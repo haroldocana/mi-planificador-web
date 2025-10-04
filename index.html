@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificador Financiero Completo (React + Firebase)</title>
+    <!-- Carga de Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+    </style>
+
+    <!-- CRÍTICO: Carga de React y ReactDOM CDN ANTES de Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Carga de Babel para procesar JSX directamente en el navegador -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+    <!-- Contenedor donde React montará la aplicación -->
+    <div id="root">
+        <!-- Mensaje de carga inicial, será reemplazado por React -->
+        <div class="flex items-center justify-center p-8 min-h-screen bg-gray-50">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-indigo-500"></div>
+            <p class="ml-4 text-xl font-semibold text-gray-700">Cargando aplicación...</p>
+        </div>
+    </div>
+
+    <!-- 
+    ===================================================================================
+    BLOQUE 1: Carga y Exposición de Funciones de Firebase (Tipo Module)
+    Utilizamos 'type="module"' para importar las funciones y las exponemos al alcance global.
+    Esto resuelve el problema de la dependencia de SDK no cargado.
+    ===================================================================================
+    -->
+    <script type="module">
+        // Importa las funciones específicas desde los módulos de Firebase CDN (versión 11.6.1)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, query, onSnapshot, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Exponemos las funciones al objeto global 'window' para que el script de React/Babel pueda acceder a ellas.
+        window.initializeApp = initializeApp;
+
+        // Auth functions
+        window.getAuth = getAuth;
+        window.signInAnonymously = signInAnonymously;
+        window.signInWithCustomToken = signInWithCustomToken;
+        window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+        window.signOut = signOut;
+        window.onAuthStateChanged = onAuthStateChanged;
+
+        // Firestore functions
+        window.getFirestore = getFirestore;
+        window.doc = doc;
+        window.setDoc = setDoc;
+        window.collection = collection;
+        window.query = query;
+        window.onSnapshot = onSnapshot;
+        window.updateDoc = updateDoc;
+        window.deleteDoc = deleteDoc;
+
+        console.log("Firebase functions successfully exposed to global scope.");
+    </script>
+
+    <!-- 
+    ===================================================================================
+    BLOQUE 2: Lógica de la Aplicación React (Tipo Babel)
+    Este bloque ahora asume que las funciones de Firebase están disponibles en el alcance global (window).
+    ===================================================================================
+    -->
+    <script type="text/babel">
+        // =================================================================
+        // Variables Globales Proporcionadas por el Entorno (Simulación)
+        // =================================================================
+        const __app_id = typeof __app_id !== 'undefined' ? __app_id : 'planner-app-v1';
+        // Reemplaza {} con tu configuración real de Firebase si la tienes.
+        const __firebase_config = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        
+        // --- Declaración de variables para contener las instancias de Firebase ---
+        let db = null;
+        let auth = null;
+        let app = null;
+
+        const { useState, useEffect, useCallback } = React;
+
+        // Rutas de Firestore: Usan las variables 'db', 'app_id' que serán inicializadas
+        const getProfileDocRef = (userId) => doc(db, `artifacts/${__app_id}/users/${userId}/profile/info`);
+        const getDebtsCollectionRef = (userId) => collection(db, `artifacts/${__app_id}/users/${userId}/finance/debts`);
+
+        // Componente para manejar el estado de carga y error
+        const LoadingIndicator = ({ text = "Cargando..." }) => (
+          <div className="flex items-center justify-center p-8 min-h-screen bg-gray-50">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-indigo-500"></div>
+            <p className="ml-4 text-xl font-semibold text-gray-700">{text}</p>
+          </div>
+        );
+
+        // --- Componente: Gestor de Deudas (DebtManager) ---
+
+        const DebtManager = ({ userId }) => {
+          const [debts, setDebts] = useState([]);
+          const [newDebt, setNewDebt] = useState({ name: '', amount: '', dueDate: '' });
+          const [loading, setLoading] = useState(true);
+
+          // Carga las deudas en tiempo real
+          useEffect(() => {
+            // Utilizamos las funciones globales que fueron expuestas por el script module
+            if (!db || !userId || typeof onSnapshot === 'undefined') return;
+
+            setLoading(true);
+            const q = query(getDebtsCollectionRef(userId));
+
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+              const debtList = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                amount: parseFloat(doc.data().amount) || 0,
+              }));
+              setDebts(debtList);
+              setLoading(false);
+            }, (error) => {
+              console.error("Error al cargar deudas: ", error);
+              setLoading(false);
+            });
+
+            return () => unsubscribe();
+          }, [db, userId]);
+
+          const totalDebt = debts.reduce((sum, debt) => sum + debt.amount, 0);
+
+          const handleInputChange = (e) => {
+            const { name, value } = e.target;
+            setNewDebt(prev => ({ ...prev, [name]: value }));
+          };
+
+          const addDebt = async (e) => {
+            e.preventDefault();
+            if (!newDebt.name || !newDebt.amount || !newDebt.dueDate) return;
+
+            try {
+              if (typeof setDoc === 'undefined' || typeof doc === 'undefined') throw new Error("Firestore functions not available.");
+
+              const debtData = {
+                name: newDebt.name,
+                amount: parseFloat(newDebt.amount),
+                dueDate: newDebt.dueDate,
+                createdAt: new Date().toISOString(),
+              };
+              // setDoc con un doc() vacío en la colección genera un ID único
+              await setDoc(doc(getDebtsCollectionRef(userId)), debtData); 
+
+              setNewDebt({ name: '', amount: '', dueDate: '' });
+            } catch (error) {
+              console.error("Error al agregar deuda: ", error);
+            }
+          };
+
+          const deleteDebt = async (id) => {
+            try {
+              if (typeof deleteDoc === 'undefined' || typeof doc === 'undefined') throw new Error("Firestore functions not available.");
+              await deleteDoc(doc(getDebtsCollectionRef(userId), id));
+            } catch (error) {
+              console.error("Error al eliminar deuda: ", error);
+            }
+          };
+
+          if (loading) return <LoadingIndicator text="Cargando tus deudas..." />;
+
+          return (
+            <div className="p-4 md:p-8 max-w-4xl mx-auto">
+              <h2 className="text-3xl font-bold mb-6 text-indigo-700">Gestor de Deudas</h2>
+
+              {/* Tarjeta de Resumen */}
+              <div className="bg-white p-6 rounded-xl shadow-lg mb-8 border-l-4 border-red-500">
+                <p className="text-sm font-medium text-gray-500">Deuda Total Pendiente</p>
+                <p className="text-4xl font-extrabold text-red-600 mt-1">
+                  ${totalDebt.toFixed(2)}
+                </p>
+              </div>
+
+              {/* Formulario para Agregar Nueva Deuda */}
+              <div className="bg-gray-50 p-6 rounded-xl shadow-inner mb-8">
+                <h3 className="text-xl font-semibold mb-4 text-indigo-600">Registrar Nueva Deuda</h3>
+                <form onSubmit={addDebt} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <input
+                    type="text"
+                    name="name"
+                    value={newDebt.name}
+                    onChange={handleInputChange}
+                    placeholder="Nombre (Ej: Tarjeta de Crédito)"
+                    required
+                    className="col-span-4 md:col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="number"
+                    name="amount"
+                    value={newDebt.amount}
+                    onChange={handleInputChange}
+                    placeholder="Monto ($)"
+                    required
+                    min="0.01"
+                    step="0.01"
+                    className="col-span-4 md:col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="date"
+                    name="dueDate"
+                    value={newDebt.dueDate}
+                    onChange={handleInputChange}
+                    required
+                    className="col-span-4 md:col-span-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <button
+                    type="submit"
+                    className="col-span-4 md:col-span-1 p-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md"
+                  >
+                    Agregar Deuda
+                  </button>
+                </form>
+              </div>
+
+              {/* Lista de Deudas */}
+              <h3 className="text-2xl font-semibold mb-4 text-indigo-700">Deudas Registradas ({debts.length})</h3>
+              <div className="space-y-4">
+                {debts.length === 0 ? (
+                  <p className="text-gray-500 italic p-4 bg-white rounded-xl shadow">No tienes deudas registradas aún. ¡Felicidades!</p>
+                ) : (
+                  debts
+                    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate)) // Ordenar por fecha de vencimiento
+                    .map((debt) => (
+                    <div key={debt.id} className="flex flex-col md:flex-row items-start md:items-center justify-between bg-white p-4 rounded-xl shadow hover:shadow-lg transition duration-150 border-l-4 border-gray-200 hover:border-red-400">
+                      <div className="flex-grow mb-2 md:mb-0">
+                        <p className="font-bold text-lg text-gray-800">{debt.name}</p>
+                        <p className="text-sm text-gray-500">Vence: {new Date(debt.dueDate).toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' })}</p>
+                      </div>
+                      <div className="flex items-center space-x-4">
+                        <span className="text-xl font-extrabold text-red-500">${debt.amount.toFixed(2)}</span>
+                        <button
+                          onClick={() => deleteDebt(debt.id)}
+                          className="p-2 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition duration-150"
+                          title="Eliminar Deuda"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        // --- Componente: Asesor Financiero (FinanceAdvisor) ---
+
+        const FinanceAdvisor = () => {
+          const tips = [
+            { title: "Crea un Fondo de Emergencia", icon: "💰", text: "Ahorra el equivalente a 3-6 meses de gastos fijos. Guárdalo en una cuenta de fácil acceso y no lo toques." },
+            { title: "Presupuesta con la Regla 50/30/20", icon: "📊", "text": "Asigna el 50% de tus ingresos a necesidades (vivienda, comida), 30% a deseos (entretenimiento, ocio) y 20% a ahorro/inversión." },
+            { title: "Prioriza Pagar Deudas Caras", icon: "📉", text: "Enfócate en pagar primero las deudas con la tasa de interés más alta (como tarjetas de crédito). Esto minimiza el costo total." },
+            { title: "Automatiza tu Ahorro", icon: "⚙️", text: "Configura transferencias automáticas a tu cuenta de ahorros o inversión inmediatamente después de recibir tu pago. ¡Págate a ti mismo primero!" },
+            { title: "Negocia y Revisa tus Suscripciones", icon: "📱", text: "Revisa todos tus gastos recurrentes. Cancela los servicios que no uses o llama para negociar una mejor tarifa." },
+          ];
+
+          return (
+            <div className="p-4 md:p-8 max-w-4xl mx-auto">
+              <h2 className="text-3xl font-bold mb-6 text-emerald-700">Asesor Financiero</h2>
+              <p className="text-gray-600 mb-8">Consejos prácticos para ayudarte a mejorar tu salud financiera. Recuerda que esto es solo orientación general.</p>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {tips.map((tip, index) => (
+                  <div key={index} className="bg-white p-6 rounded-xl shadow-lg border-l-4 border-emerald-400">
+                    <div className="flex items-center mb-3">
+                      <span className="text-3xl mr-3">{tip.icon}</span>
+                      <h3 className="text-xl font-semibold text-gray-800">{tip.title}</h3>
+                    </div>
+                    <p className="text-gray-600">{tip.text}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-8 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+                <p className="text-sm text-emerald-800 font-medium">
+                  💡 **Aviso:** Esta sección ofrece consejos generales. Para consultas financieras detalladas, consulta a un profesional.
+                </p>
+              </div>
+            </div>
+          );
+        };
+
+        // --- Componente: Dashboard Principal ---
+
+        const Dashboard = ({ user, userProfile }) => {
+          const [date, setDate] = useState(new Date());
+
+          useEffect(() => {
+            const timer = setInterval(() => setDate(new Date()), 60000);
+            return () => clearInterval(timer);
+          }, []);
+
+          return (
+            <div className="p-4 md:p-8 max-w-5xl mx-auto">
+              <header className="mb-8">
+                <h1 className="text-4xl font-extrabold text-gray-800">
+                  Hola, {userProfile?.name || 'Usuario'} 👋
+                </h1>
+                <p className="text-lg text-gray-500 mt-1">
+                  Tu planificador financiero personal. Hoy es {date.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}.
+                </p>
+              </header>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Tarjeta de Usuario */}
+                <div className="bg-white p-6 rounded-xl shadow-xl col-span-1 md:col-span-1 border-l-4 border-indigo-500">
+                  <h2 className="text-2xl font-bold text-indigo-700 mb-4">Información de Cuenta</h2>
+                  <p className="text-gray-700 font-semibold">Nombre:</p>
+                  <p className="text-gray-900 mb-3">{userProfile?.name || 'No disponible'}</p>
+                  <p className="text-gray-700 font-semibold">Correo Electrónico:</p>
+                  <p className="text-gray-900 mb-3">{user?.email || 'Anónimo'}</p>
+                  <p className="text-gray-700 font-semibold">ID de Usuario (para compartir):</p>
+                  <p className="text-xs text-gray-600 break-words font-mono bg-gray-100 p-2 rounded">{user?.uid}</p>
+                </div>
+
+                {/* Tarjeta de Resumen */}
+                <div className="bg-indigo-600 text-white p-6 rounded-xl shadow-xl col-span-1 md:col-span-2 flex flex-col justify-center">
+                  <p className="text-sm opacity-80">Mensaje del Planificador</p>
+                  <p className="text-3xl font-extrabold mt-1">
+                    ¡Tu futuro financiero está en tus manos!
+                  </p>
+                  <p className="mt-4 text-sm opacity-80">
+                    Utiliza el Gestor de Deudas para mantener tus obligaciones claras y el Asesor para seguir mejorando.
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+
+        // --- Componente: Formulario de Autenticación (AuthForm) ---
+
+        const AuthForm = ({ setView }) => {
+          const [isRegistering, setIsRegistering] = useState(false);
+          const [name, setName] = useState('');
+          const [email, setEmail] = useState('');
+          const [password, setPassword] = useState('');
+          const [loading, setLoading] = useState(false);
+          const [error, setError] = useState(null);
+
+          const handleSubmit = async (e) => {
+            e.preventDefault();
+            setError(null);
+            setLoading(true);
+
+            // Verificación para evitar llamadas a funciones no cargadas
+            if (!auth || typeof createUserWithEmailAndPassword === 'undefined' || typeof setDoc === 'undefined') {
+                setError("La aplicación aún se está inicializando. Por favor, espera un momento y vuelve a intentar.");
+                setLoading(false);
+                return;
+            }
+
+            try {
+              if (isRegistering) {
+                // 1. Crear usuario con Email y Contraseña
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // 2. Guardar información personal adicional en Firestore
+                await setDoc(doc(db, `artifacts/${__app_id}/users/${user.uid}/profile/info`), {
+                  name: name,
+                  email: user.email,
+                  createdAt: new Date().toISOString(),
+                });
+              } else {
+                // Iniciar sesión
+                await signInWithEmailAndPassword(auth, email, password);
+              }
+            } catch (err) {
+              console.error("Error de autenticación: ", err);
+              let errorMessage = "Ocurrió un error. Intenta de nuevo.";
+              if (err.code === 'auth/email-already-in-use') {
+                errorMessage = "El correo electrónico ya está registrado.";
+              } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+                errorMessage = "Credenciales incorrectas. Verifica tu email y contraseña.";
+              } else if (err.code === 'auth/weak-password') {
+                errorMessage = "Contraseña muy débil. Debe tener al menos 6 caracteres.";
+              }
+              setError(errorMessage);
+            } finally {
+              setLoading(false);
+            }
+          };
+
+          return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
+              <div className="w-full max-w-md bg-white p-8 rounded-xl shadow-2xl border-t-4 border-indigo-600">
+                <h2 className="text-3xl font-bold text-center text-gray-800 mb-6">
+                  {isRegistering ? 'Crear Cuenta' : 'Iniciar Sesión'}
+                </h2>
+                <p className="text-sm text-center text-gray-500 mb-6">
+                  {isRegistering
+                    ? 'Regístrate para comenzar a gestionar tus finanzas.'
+                    : 'Ingresa tus credenciales.'
+                  }
+                </p>
+
+                {error && (
+                  <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 text-sm" role="alert">
+                    {error}
+                  </div>
+                )}
+
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {isRegistering && (
+                    <input
+                      type="text"
+                      placeholder="Nombre Completo"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                      className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                    />
+                  )}
+                  <input
+                    type="email"
+                    placeholder="Correo Electrónico"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                  <input
+                    type="password"
+                    placeholder="Contraseña"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full p-3 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-150 shadow-md disabled:opacity-50"
+                  >
+                    {loading ? 'Procesando...' : (isRegistering ? 'Registrarse' : 'Iniciar Sesión')}
+                  </button>
+                </form>
+
+                <p className="text-center text-sm mt-6">
+                  {isRegistering ? '¿Ya tienes una cuenta?' : '¿Necesitas una cuenta?'}
+                  <button
+                    onClick={() => {
+                      setIsRegistering(!isRegistering);
+                      setError(null);
+                    }}
+                    className="text-indigo-600 font-semibold ml-2 hover:text-indigo-800 transition duration-150"
+                  >
+                    {isRegistering ? 'Iniciar Sesión' : 'Registrarme'}
+                  </button>
+                </p>
+              </div>
+            </div>
+          );
+        };
+
+
+        // --- Componente Principal: App ---
+
+        const App = () => {
+          const [user, setUser] = useState(null);
+          const [userProfile, setUserProfile] = useState(null);
+          const [loadingAuth, setLoadingAuth] = useState(true);
+          const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'debt', 'advisor', 'auth'
+
+          // 1. Inicialización de Firebase y Autenticación
+          useEffect(() => {
+            // Verificamos que las funciones necesarias estén disponibles en el scope global
+            if (typeof initializeApp === 'undefined' || typeof getAuth === 'undefined' || typeof getFirestore === 'undefined') {
+              console.error("Firebase functions not globally available yet.");
+              // Si no están disponibles, configuramos un temporizador para reintentar la inicialización en 1 segundo
+              const timer = setTimeout(() => {
+                // Forzamos el re-render para que useEffect se ejecute de nuevo
+                setLoadingAuth(true); // O cualquier otra acción para reintentar
+                console.log("Reintentando inicialización...");
+              }, 1000); 
+              setLoadingAuth(true); // Mantenemos el spinner visible
+              return () => clearTimeout(timer); // Limpiamos el temporizador si el componente se desmonta
+            }
+
+            if (!auth) {
+                try {
+                    // Inicializar Firebase (solo si no está inicializado)
+                    app = initializeApp(__firebase_config);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    console.log("Firebase inicializado con éxito.");
+                } catch (e) {
+                    console.error("Fallo la inicialización de Firebase:", e);
+                    setLoadingAuth(false);
+                    return;
+                }
+            }
+
+            // Lógica de Autenticación y Observador de estado
+            const authenticate = async () => {
+              try {
+                if (__initial_auth_token) {
+                  await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                  await signInAnonymously(auth);
+                }
+              } catch (e) {
+                console.error("Fallo la autenticación inicial:", e);
+                setUser(null);
+                setLoadingAuth(false);
+                setCurrentView('auth');
+              }
+            };
+
+            // onAuthStateChanged es la fuente de verdad del estado de autenticación
+            const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+              setUser(currentUser);
+              setLoadingAuth(false);
+              if (currentUser && !currentUser.isAnonymous) {
+                setCurrentView('dashboard');
+              } else if (!currentUser) {
+                setCurrentView('auth');
+              }
+            });
+
+            // Llamamos a authenticate solo si no estamos suscritos (es la primera vez)
+            authenticate();
+
+            return () => unsubscribe();
+          }, [/* dependencias intencionalmente vacías para ejecutar solo una vez o al reintentar */]); 
+
+          // 2. Carga del Perfil de Usuario
+          useEffect(() => {
+            // Aseguramos que 'db' y 'user' estén disponibles y que onSnapshot esté en el scope
+            if (!db || !user || typeof onSnapshot === 'undefined') {
+              setUserProfile(null);
+              return;
+            }
+
+            const docRef = getProfileDocRef(user.uid);
+
+            const unsubscribeProfile = onSnapshot(docRef, (docSnap) => {
+              if (docSnap.exists()) {
+                setUserProfile(docSnap.data());
+              } else {
+                setUserProfile({ name: user.isAnonymous ? 'Anónimo' : 'Nuevo Usuario'}); // Perfil por defecto
+              }
+            }, (error) => {
+              console.error("Error al cargar el perfil de usuario: ", error);
+              setUserProfile(null);
+            });
+
+            return () => unsubscribeProfile();
+
+          }, [db, user]);
+
+          const handleSignOut = async () => {
+            if(auth && typeof signOut !== 'undefined') {
+               await signOut(auth);
+            }
+            setCurrentView('auth');
+          };
+
+          const renderContent = () => {
+            if (loadingAuth) {
+              return <LoadingIndicator text="Inicializando la aplicación..." />;
+            }
+
+            if (!user || currentView === 'auth') {
+              return <AuthForm setView={setCurrentView} />;
+            }
+
+            // Vistas principales
+            switch (currentView) {
+              case 'debt':
+                return <DebtManager userId={user.uid} />;
+              case 'advisor':
+                return <FinanceAdvisor />;
+              case 'dashboard':
+              default:
+                return <Dashboard user={user} userProfile={userProfile} />;
+            }
+          };
+
+          const MenuButton = ({ view, label, icon }) => (
+            <button
+              onClick={() => setCurrentView(view)}
+              className={`flex items-center p-3 w-full text-left rounded-lg transition duration-150 ${currentView === view
+                  ? 'bg-white shadow-md text-indigo-700 font-bold'
+                  : 'text-gray-200 hover:bg-indigo-700 hover:text-white'
+                }`}
+            >
+              <span className="mr-3 text-xl">{icon}</span>
+              <span className="hidden md:inline">{label}</span>
+            </button>
+          );
+
+          // Renderizado de la UI principal con menú
+          return (
+            <div className="min-h-screen bg-gray-50 flex font-sans">
+              {/* Sidebar de Navegación */}
+              <nav className="w-16 md:w-64 bg-indigo-800 p-3 flex flex-col fixed h-full shadow-xl z-10">
+                <h1 className="text-xl font-extrabold text-white text-center mb-6 mt-2 hidden md:block">
+                  Planificador
+                </h1>
+                <h1 className="text-xl font-extrabold text-white text-center mb-6 mt-2 md:hidden">
+                  P
+                </h1>
+                <div className="space-y-2 flex-grow">
+                  <MenuButton view="dashboard" label="Dashboard" icon="🏠" />
+                  <MenuButton view="debt" label="Gestor de Deudas" icon="💸" />
+                  <MenuButton view="advisor" label="Asesor Financiero" icon="💡" />
+                </div>
+
+                {user && (
+                  <div className="mt-auto pt-4 border-t border-indigo-700">
+                    <p className="text-sm text-gray-400 mb-2 hidden md:block">Sesión: {userProfile?.name || 'Usuario'}</p>
+                    
+                    {user.isAnonymous ? (
+                      <button
+                          onClick={() => setCurrentView('auth')}
+                          className="flex items-center p-3 w-full text-left text-yellow-300 hover:bg-indigo-700 hover:text-white rounded-lg transition duration-150"
+                          title="Registrar/Iniciar Sesión"
+                      >
+                          <span className="mr-3 text-xl">👤</span>
+                          <span className="hidden md:inline">Registrar/Ingresar</span>
+                      </button>
+                    ) : (
+                      <button
+                          onClick={handleSignOut}
+                          className="flex items-center p-3 w-full text-left text-red-300 hover:bg-indigo-700 hover:text-red-100 rounded-lg transition duration-150"
+                          title="Cerrar Sesión"
+                      >
+                          <span className="mr-3 text-xl">🚪</span>
+                          <span className="hidden md:inline">Cerrar Sesión</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </nav>
+
+              {/* Contenido Principal */}
+              <main className="flex-grow ml-16 md:ml-64 w-full">
+                {renderContent()}
+              </main>
+            </div>
+          );
+        }
+
+        // Bloque de montaje de React (ejecutado en window.onload para asegurar que React/Babel estén cargados)
+        window.onload = function() {
+            const rootElement = document.getElementById('root');
+            
+            // Verificamos que las funciones que expusimos en el script 'module' estén ahora disponibles
+            if (typeof initializeApp === 'undefined') {
+                rootElement.innerHTML = '<div class="flex items-center justify-center min-h-screen bg-gray-100 p-8"><div class="p-10 text-center text-xl text-red-700 bg-red-100 rounded-xl shadow-lg border-l-4 border-red-500">❌ Error Crítico: No se pudo cargar el SDK de Firebase o las funciones de inicialización.</div></div>';
+                console.error("Error: Las funciones de Firebase no están disponibles. El script 'module' puede haber fallado o la carga fue muy lenta.");
+                return;
+            }
+
+            try {
+                // Montar la aplicación React
+                const root = ReactDOM.createRoot(rootElement);
+                root.render(<App />);
+
+            } catch (e) {
+                console.error("Error durante el montaje de React:", e);
+                rootElement.innerHTML = '<div class="flex items-center justify-center min-h-screen bg-gray-100 p-8"><div class="p-10 text-center text-xl text-red-700 bg-red-100 rounded-xl shadow-lg border-l-4 border-red-500">❌ Error de Montaje de la Aplicación: ' + (e.message || 'Fallo al inicializar la aplicación React.') + '</div></div>';
+            }
+        };
+    </script>
+</body>
+</html>
