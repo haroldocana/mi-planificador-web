@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificador Colaborativo</title>
+    <!-- Carga de React y ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <!-- Carga de Babel para transformar JSX/ES6+ en código JS compatible con navegadores -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Carga de Tailwind CSS (Single File Setup) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carga de Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <!-- Carga de Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, where, addDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variables globales que deben ser definidas por el entorno (Canvas)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (firebaseConfig) {
+            window.firebaseApp = initializeApp(firebaseConfig);
+            window.db = getFirestore(window.firebaseApp);
+            window.auth = getAuth(window.firebaseApp);
+
+            const signInUser = async () => {
+                try {
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(window.auth, initialAuthToken);
+                        console.log("Firebase: Usuario autenticado con token personalizado.");
+                    } else {
+                        await signInAnonymously(window.auth);
+                        console.log("Firebase: Usuario autenticado anónimamente.");
+                    }
+                } catch (error) {
+                    console.error("Error en la autenticación de Firebase:", error);
+                }
+            };
+
+            // Esperar el estado de autenticación inicial y luego iniciar la aplicación React
+            onAuthStateChanged(window.auth, (user) => {
+                if (!user) {
+                    signInUser();
+                } else {
+                    console.log("Firebase: Estado de autenticación detectado. UID:", user.uid);
+                    // Disparar un evento o actualizar un estado global si fuese necesario
+                }
+            });
+            
+            // Exponer las dependencias a Babel/React
+            window.firebase = {
+                getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged,
+                getFirestore, doc, getDoc, setDoc, onSnapshot, collection, query, where, addDoc, getDocs, deleteDoc,
+                auth: window.auth,
+                db: window.db,
+                appId: appId,
+            };
+        } else {
+            console.error("Firebase config no está disponible.");
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+        }
+        /* Estilo para que los íconos de Lucide se vean bien */
+        .lucide-icon {
+            display: inline-block;
+            vertical-align: middle;
+            stroke-width: 2;
+        }
+    </style>
+</head>
+<body>
+    <div id="root" class="min-h-screen">
+        <!-- React App se montará aquí -->
+    </div>
+
+    <script type="text/babel">
+        // Importar React, hooks, y lucide
+        const { useState, useEffect, useCallback } = React;
+        const { createRoot } = ReactDOM;
+        
+        // Inicializar Lucide Icons
+        const { createIcons, icons } = lucide;
+
+        // --- Constantes y Utilidades ---
+        const VIEWS = {
+            DASHBOARD: 'dashboard',
+            DEBT_MANAGER: 'debt_manager',
+            ADVISOR: 'advisor'
+        };
+
+        const DEBT_TYPES = {
+            CREDIT_CARD: 'Tarjeta de Crédito',
+            LOAN: 'Préstamo Personal',
+            MORTGAGE: 'Hipoteca',
+            OTHER: 'Otro'
+        };
+
+        // Función de utilidad para generar un ID aleatorio (fallback si no hay auth.currentUser)
+        const generateRandomId = () => crypto.randomUUID();
+
+        // Función de retardo para Exponential Backoff
+        const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+        // --- FIREBASE / FIRESTORE UTILITIES (Adaptadas para usar 'window.firebase') ---
+
+        const getUserId = () => {
+            const auth = window.firebase?.auth;
+            return auth?.currentUser?.uid || generateRandomId();
+        };
+
+        const getAppId = () => window.firebase?.appId || 'default-app-id';
+        const getDB = () => window.firebase?.db;
+
+        // Ruta de colección pública: /artifacts/{appId}/public/data/groups
+        const getPublicCollectionRef = (collectionName) => {
+            const db = getDB();
+            const appId = getAppId();
+            if (!db) return null;
+            return window.firebase.collection(db, `artifacts/${appId}/public/data/${collectionName}`);
+        };
+
+        // Ruta de colección privada (datos del usuario): /artifacts/{appId}/users/{userId}/debts
+        const getPrivateCollectionRef = (collectionName, userId) => {
+            const db = getDB();
+            const appId = getAppId();
+            if (!db || !userId) return null;
+            return window.firebase.collection(db, `artifacts/${appId}/users/${userId}/${collectionName}`);
+        };
+
+        const COLLECTION_NAMES = {
+            GROUPS: 'groups',
+            DEBTS: 'debts',
+        };
+
+
+        // --- Componentes Compartidos ---
+
+        const Icon = ({ name, className, size = 24 }) => {
+            const iconHtml = icons[name] ? icons[name].toSvg({ class: `lucide-icon ${className}`, width: size, height: size }) : '';
+            return <span dangerouslySetInnerHTML={{ __html: iconHtml }} />;
+        };
+
+        const NavButton = ({ view, currentView, setView, iconName, label }) => (
+            <button
+                onClick={() => setView(view)}
+                className={`flex-1 flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-200 
+                            ${currentView === view
+                                ? 'bg-indigo-600 text-white shadow-lg'
+                                : 'text-gray-600 hover:bg-gray-100'
+                            }`}
+                aria-current={currentView === view ? 'page' : undefined}
+            >
+                <Icon name={iconName} size={20} className="mb-0.5" />
+                <span className="text-xs font-medium hidden sm:block">{label}</span>
+            </button>
+        );
+
+        // --- DASHBOARD: Gestión de Grupos Colaborativos ---
+
+        const GroupCard = ({ group, userId }) => {
+            const isOwner = group.ownerId === userId;
+            const isMember = group.members.includes(userId);
+
+            const joinGroup = async () => {
+                const db = getDB();
+                if (!db) return console.error("Database not initialized.");
+                try {
+                    const groupDocRef = window.firebase.doc(getPublicCollectionRef(COLLECTION_NAMES.GROUPS), group.id);
+                    const newMembers = [...group.members, userId];
+                    await window.firebase.setDoc(groupDocRef, { members: newMembers }, { merge: true });
+                    console.log(`Usuario ${userId} unido al grupo ${group.id}`);
+                } catch (e) {
+                    console.error("Error al unirse al grupo:", e);
+                }
+            };
+
+            const leaveGroup = async () => {
+                const db = getDB();
+                if (!db) return console.error("Database not initialized.");
+                try {
+                    const groupDocRef = window.firebase.doc(getPublicCollectionRef(COLLECTION_NAMES.GROUPS), group.id);
+                    const newMembers = group.members.filter(id => id !== userId);
+                    await window.firebase.setDoc(groupDocRef, { members: newMembers }, { merge: true });
+                    console.log(`Usuario ${userId} ha salido del grupo ${group.id}`);
+                } catch (e) {
+                    console.error("Error al salir del grupo:", e);
+                }
+            };
+
+            const deleteGroup = async () => {
+                 const db = getDB();
+                if (!db) return console.error("Database not initialized.");
+                // Usamos un modal simulado para la confirmación
+                if (!window.confirm("¿Estás seguro de que quieres eliminar este grupo? Esta acción es irreversible.")) {
+                    return;
+                }
+                try {
+                    await window.firebase.deleteDoc(window.firebase.doc(getPublicCollectionRef(COLLECTION_NAMES.GROUPS), group.id));
+                    console.log(`Grupo ${group.id} eliminado`);
+                } catch (e) {
+                    console.error("Error al eliminar el grupo:", e);
+                }
+            };
+
+
+            return (
+                <div className="bg-white p-4 sm:p-6 rounded-xl shadow-md transition-shadow hover:shadow-lg border border-gray-100 mb-4">
+                    <h3 className="text-lg sm:text-xl font-bold text-indigo-800 mb-2">{group.name}</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                        <span className="font-semibold">ID del Grupo:</span> <code className="bg-yellow-100 p-1 rounded text-xs">{group.id}</code>
+                    </p>
+                    <p className="text-sm text-gray-700 mb-4">
+                        <span className="font-semibold">Miembros:</span> {group.members.length} ({isOwner ? 'Eres el Creador' : isMember ? 'Eres Miembro' : 'No eres Miembro'})
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+                        {!isMember ? (
+                            <button
+                                onClick={joinGroup}
+                                className="w-full sm:w-auto bg-green-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-600 transition-colors"
+                            >
+                                Unirse
+                            </button>
+                        ) : (
+                            <button
+                                onClick={leaveGroup}
+                                className="w-full sm:w-auto bg-yellow-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-yellow-600 transition-colors"
+                            >
+                                Salir
+                            </button>
+                        )}
+                        {isOwner && (
+                            <button
+                                onClick={deleteGroup}
+                                className="w-full sm:w-auto bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 transition-colors"
+                            >
+                                <Icon name="Trash2" size={16} className="mr-1" /> Eliminar Grupo
+                            </button>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const Dashboard = ({ userId, groups }) => {
+            const [newGroupName, setNewGroupName] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+
+            const createGroup = async () => {
+                const db = getDB();
+                if (!db || !newGroupName) return;
+
+                setIsLoading(true);
+                try {
+                    const newGroup = {
+                        name: newGroupName,
+                        ownerId: userId,
+                        members: [userId], // El creador es automáticamente el primer miembro
+                        createdAt: new Date().toISOString(),
+                    };
+
+                    const docRef = await window.firebase.addDoc(getPublicCollectionRef(COLLECTION_NAMES.GROUPS), newGroup);
+                    console.log("Grupo creado con ID:", docRef.id);
+                    setNewGroupName('');
+                } catch (e) {
+                    console.error("Error al crear el grupo:", e);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            return (
+                <div className="space-y-6 p-4 sm:p-6 bg-gray-50 rounded-2xl shadow-inner">
+                    <h2 className="text-2xl sm:text-3xl font-extrabold text-indigo-700 border-b pb-2">Mis Grupos Colaborativos</h2>
+
+                    <div className="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-indigo-100">
+                        <h3 className="text-xl font-semibold text-indigo-600 mb-4 flex items-center">
+                            <Icon name="Users" size={20} className="mr-2" /> Crear Nuevo Grupo
+                        </h3>
+                        <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-3">
+                            <input
+                                type="text"
+                                value={newGroupName}
+                                onChange={(e) => setNewGroupName(e.target.value)}
+                                placeholder="Nombre del Grupo (ej: Ahorros de Viaje)"
+                                className="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
+                                disabled={isLoading}
+                            />
+                            <button
+                                onClick={createGroup}
+                                className="bg-indigo-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-indigo-700 transition-colors disabled:opacity-50"
+                                disabled={isLoading || !newGroupName.trim()}
+                            >
+                                <Icon name="PlusCircle" size={18} className="mr-1 inline-block" /> Crear Nuevo Grupo
+                            </button>
+                        </div>
+                    </div>
+
+                    <h3 className="text-xl font-bold text-gray-700 border-b pb-2">Grupos Disponibles ({groups.length})</h3>
+                    {isLoading && (
+                        <div className="text-center text-indigo-500 font-medium p-4">Cargando grupos...</div>
+                    )}
+                    {groups.length === 0 && !isLoading ? (
+                        <p className="text-gray-500 italic p-4 bg-white rounded-lg text-center">
+                            No hay grupos. ¡Crea el primero o espera a que otros los creen!
+                        </p>
+                    ) : (
+                        <div className="space-y-4">
+                            {groups.map(group => (
+                                <GroupCard key={group.id} group={group} userId={userId} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- DEBT_MANAGER: Gestión de Deudas Personales ---
+
+        const DebtForm = ({ userId, setDebts }) => {
+            const [formData, setFormData] = useState({
+                name: '',
+                amount: '',
+                interestRate: '',
+                minPayment: '',
+                type: DEBT_TYPES.CREDIT_CARD,
+                status: 'Activa'
+            });
+            const [isLoading, setIsLoading] = useState(false);
+
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setFormData(prev => ({ ...prev, [name]: value }));
+            };
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                const db = getDB();
+                const userRef = getUserId();
+                if (!db || !userRef) return console.error("Database or User ID not available.");
+
+                setIsLoading(true);
+                try {
+                    const newDebt = {
+                        ...formData,
+                        amount: parseFloat(formData.amount),
+                        interestRate: parseFloat(formData.interestRate),
+                        minPayment: parseFloat(formData.minPayment),
+                        createdAt: new Date().toISOString(),
+                        userId: userRef,
+                    };
+
+                    await window.firebase.addDoc(getPrivateCollectionRef(COLLECTION_NAMES.DEBTS, userRef), newDebt);
+                    console.log("Deuda agregada exitosamente.");
+                    setFormData({ // Reset form
+                        name: '', amount: '', interestRate: '', minPayment: '', type: DEBT_TYPES.CREDIT_CARD, status: 'Activa'
+                    });
+                } catch (e) {
+                    console.error("Error al agregar la deuda:", e);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            return (
+                <form onSubmit={handleSubmit} className="bg-white p-4 sm:p-6 rounded-xl shadow-md border border-purple-100 mb-6">
+                    <h3 className="text-xl font-semibold text-purple-600 mb-4 flex items-center">
+                        <Icon name="Wallet" size={20} className="mr-2" /> Agregar Nueva Deuda
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <input name="name" type="text" placeholder="Nombre de la Deuda (ej: Visa Platino)" value={formData.name} onChange={handleChange} required className="p-3 border rounded-lg" />
+                        <select name="type" value={formData.type} onChange={handleChange} className="p-3 border rounded-lg">
+                            {Object.values(DEBT_TYPES).map(type => (
+                                <option key={type} value={type}>{type}</option>
+                            ))}
+                        </select>
+                        <input name="amount" type="number" step="0.01" placeholder="Monto Total ($)" value={formData.amount} onChange={handleChange} required className="p-3 border rounded-lg" />
+                        <input name="interestRate" type="number" step="0.01" placeholder="Tasa de Interés Anual (%)" value={formData.interestRate} onChange={handleChange} required className="p-3 border rounded-lg" />
+                        <input name="minPayment" type="number" step="0.01" placeholder="Pago Mínimo Mensual ($)" value={formData.minPayment} onChange={handleChange} required className="p-3 border rounded-lg" />
+                        <select name="status" value={formData.status} onChange={handleChange} className="p-3 border rounded-lg">
+                            <option value="Activa">Activa</option>
+                            <option value="Pagada">Pagada</option>
+                        </select>
+                    </div>
+                    <button type="submit" className="mt-5 w-full bg-purple-600 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:bg-purple-700 transition-colors disabled:opacity-50" disabled={isLoading}>
+                        {isLoading ? 'Guardando...' : <><Icon name="Save" size={18} className="mr-1 inline-block" /> Guardar Deuda</>}
+                    </button>
+                </form>
+            );
+        };
+
+        const DebtItem = ({ debt, userId }) => {
+            const [isEditing, setIsEditing] = useState(false);
+            const [status, setStatus] = useState(debt.status);
+
+            const updateStatus = async (newStatus) => {
+                const db = getDB();
+                if (!db || !userId) return;
+                try {
+                    const debtDocRef = window.firebase.doc(getPrivateCollectionRef(COLLECTION_NAMES.DEBTS, userId), debt.id);
+                    await window.firebase.setDoc(debtDocRef, { status: newStatus }, { merge: true });
+                    setStatus(newStatus);
+                    console.log(`Estado de deuda ${debt.id} actualizado a ${newStatus}`);
+                } catch (e) {
+                    console.error("Error al actualizar estado:", e);
+                }
+            };
+            
+            const deleteDebt = async () => {
+                const db = getDB();
+                if (!db || !userId) return console.error("Database or User ID not available.");
+                if (!window.confirm("¿Estás seguro de que quieres eliminar esta deuda?")) {
+                    return;
+                }
+                try {
+                    await window.firebase.deleteDoc(window.firebase.doc(getPrivateCollectionRef(COLLECTION_NAMES.DEBTS, userId), debt.id));
+                    console.log(`Deuda ${debt.id} eliminada`);
+                } catch (e) {
+                    console.error("Error al eliminar la deuda:", e);
+                }
+            };
+
+
+            const statusClass = status === 'Pagada' ? 'bg-green-100 text-green-700 border-green-300' : 'bg-red-100 text-red-700 border-red-300';
+
+            return (
+                <div className="bg-white p-4 sm:p-6 rounded-xl shadow-md mb-4 border border-gray-100">
+                    <div className="flex justify-between items-start mb-3">
+                        <h4 className="text-lg sm:text-xl font-bold text-gray-800">{debt.name}</h4>
+                        <span className={`text-xs font-semibold px-3 py-1 rounded-full border ${statusClass}`}>{status}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm text-gray-700 mb-4">
+                        <div>
+                            <p className="font-semibold text-gray-500">Tipo</p>
+                            <p>{debt.type}</p>
+                        </div>
+                        <div>
+                            <p className="font-semibold text-gray-500">Monto</p>
+                            <p className="font-mono text-purple-600">${debt.amount.toFixed(2)}</p>
+                        </div>
+                        <div>
+                            <p className="font-semibold text-gray-500">Interés</p>
+                            <p>{debt.interestRate.toFixed(2)}%</p>
+                        </div>
+                        <div>
+                            <p className="font-semibold text-gray-500">Pago Mínimo</p>
+                            <p className="font-mono">${debt.minPayment.toFixed(2)}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 mt-4 pt-3 border-t">
+                        <button
+                            onClick={() => updateStatus(status === 'Activa' ? 'Pagada' : 'Activa')}
+                            className={`flex-1 flex justify-center items-center px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${status === 'Activa' ? 'bg-green-500 hover:bg-green-600' : 'bg-orange-500 hover:bg-orange-600'} text-white`}
+                        >
+                            <Icon name={status === 'Activa' ? 'CheckCircle' : 'ArrowLeftCircle'} size={16} className="mr-1" /> Marcar como {status === 'Activa' ? 'Pagada' : 'Activa'}
+                        </button>
+                        <button
+                            onClick={deleteDebt}
+                            className="flex-1 flex justify-center items-center bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 transition-colors"
+                        >
+                            <Icon name="Trash2" size={16} className="mr-1" /> Eliminar
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+
+        const DebtManager = ({ userId, debts }) => {
+            const totalDebt = debts.reduce((sum, debt) => sum + (debt.status === 'Activa' ? debt.amount : 0), 0);
+            const activeDebts = debts.filter(d => d.status === 'Activa').length;
+
+            return (
+                <div className="space-y-6 p-4 sm:p-6 bg-gray-50 rounded-2xl shadow-inner">
+                    <h2 className="text-2xl sm:text-3xl font-extrabold text-purple-700 border-b pb-2">Gestor de Deudas Personales</h2>
+                    
+                    <div className="bg-purple-600 text-white p-5 rounded-xl shadow-lg flex justify-between items-center flex-wrap">
+                        <div className="text-sm font-medium">Deuda Total Activa:</div>
+                        <div className="text-3xl font-bold font-mono">${totalDebt.toFixed(2)}</div>
+                        <div className="w-full text-xs mt-2">({activeDebts} deudas activas registradas)</div>
+                    </div>
+
+                    <DebtForm userId={userId} />
+
+                    <h3 className="text-xl font-bold text-gray-700 border-b pb-2">Mis Deudas ({debts.length})</h3>
+                    {debts.length === 0 ? (
+                        <p className="text-gray-500 italic p-4 bg-white rounded-lg text-center">
+                            Aún no tienes deudas registradas.
+                        </p>
+                    ) : (
+                        <div className="space-y-4">
+                            {debts
+                                .sort((a, b) => b.createdAt.localeCompare(a.createdAt)) // Ordenar por más reciente primero
+                                .map(debt => (
+                                <DebtItem key={debt.id} debt={debt} userId={userId} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        // --- ADVISOR: Asesor Financiero (Generative AI) ---
+
+        const Advisor = ({ userId }) => {
+            const [query, setQuery] = useState('');
+            const [response, setResponse] = useState(null);
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState(null);
+
+            const MODEL_NAME = "gemini-2.5-flash-preview-05-20";
+            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent?key=`; // Key will be provided by Canvas
+
+            const systemPrompt = "Eres un Asesor Financiero Personal y Colaborativo experto. Tu objetivo es proporcionar consejos claros, precisos y prácticos en español. Utiliza un tono profesional pero amigable. Cuando se te pida buscar información reciente (ej. noticias, tasas de interés actuales), utiliza Google Search para obtener datos frescos. Limita tu respuesta a un máximo de 500 palabras.";
+
+            const fetchAdvice = async () => {
+                if (!query.trim()) return;
+
+                setIsLoading(true);
+                setError(null);
+                setResponse(null);
+
+                const payload = {
+                    contents: [{ parts: [{ text: query }] }],
+                    tools: [{ "google_search": {} }], // Habilitar Google Search Grounding
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                };
+
+                const MAX_RETRIES = 3;
+                for (let i = 0; i < MAX_RETRIES; i++) {
+                    try {
+                        const response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+
+                        const result = await response.json();
+                        const candidate = result.candidates?.[0];
+
+                        if (candidate && candidate.content?.parts?.[0]?.text) {
+                            const text = candidate.content.parts[0].text;
+                            let sources = [];
+                            const groundingMetadata = candidate.groundingMetadata;
+
+                            if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                                sources = groundingMetadata.groundingAttributions
+                                    .map(attribution => ({
+                                        uri: attribution.web?.uri,
+                                        title: attribution.web?.title,
+                                    }))
+                                    .filter(source => source.uri && source.title);
+                            }
+
+                            setResponse({ text, sources });
+                            setQuery('');
+                            return;
+                        } else {
+                             // This case usually happens when the model generates no content (e.g., safety block)
+                             throw new Error("Respuesta del modelo vacía o bloqueada.");
+                        }
+
+                    } catch (e) {
+                        console.error(`Intento ${i + 1} fallido:`, e.message);
+                        if (i < MAX_RETRIES - 1) {
+                            await delay(Math.pow(2, i) * 1000); // Exponential backoff
+                        } else {
+                            setError(`Error al obtener la respuesta: ${e.message}. Intenta con otra pregunta.`);
+                        }
+                    } finally {
+                        if (i === MAX_RETRIES - 1 || response) {
+                            setIsLoading(false);
+                        }
+                    }
+                }
+            };
+
+            return (
+                <div className="space-y-6 p-4 sm:p-6 bg-gray-50 rounded-2xl shadow-inner">
+                    <h2 className="text-2xl sm:text-3xl font-extrabold text-teal-700 border-b pb-2">Asesor Financiero Gemini AI</h2>
+                    <p className="text-gray-600">Pregunta sobre estrategias de inversión, manejo de deudas, presupuestos, o consejos de ahorro.</p>
+
+                    <div className="bg-white p-4 sm:p-6 rounded-xl shadow-lg border border-teal-100">
+                        <textarea
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                            placeholder="Ej: ¿Cuál es la mejor estrategia para salir de deudas de tarjetas de crédito?"
+                            rows="4"
+                            className="w-full p-3 border border-gray-300 rounded-lg focus:ring-teal-500 focus:border-teal-500 resize-none"
+                            disabled={isLoading}
+                        />
+                        <button
+                            onClick={fetchAdvice}
+                            className="mt-3 w-full bg-teal-600 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:bg-teal-700 transition-colors disabled:opacity-50"
+                            disabled={isLoading || !query.trim()}
+                        >
+                            {isLoading ? 'Analizando tu Solicitud...' : <><Icon name="Search" size={18} className="mr-1 inline-block" /> Obtener Consejo</>}
+                        </button>
+                    </div>
+
+                    {error && (
+                        <div className="bg-red-100 text-red-700 p-4 rounded-lg font-medium border border-red-300">
+                            <Icon name="AlertTriangle" size={18} className="mr-2 inline-block" /> {error}
+                        </div>
+                    )}
+
+                    {response && (
+                        <div className="bg-white p-4 sm:p-6 rounded-xl shadow-2xl border-t-4 border-teal-500">
+                            <h3 className="text-xl font-bold text-teal-700 mb-4 flex items-center">
+                                <Icon name="Lightbulb" size={20} className="mr-2" /> Respuesta del Asesor
+                            </h3>
+                            <div className="prose max-w-none text-gray-800">
+                                <p dangerouslySetInnerHTML={{ __html: response.text.replace(/\n/g, '<br/>') }} />
+                            </div>
+                            
+                            {response.sources.length > 0 && (
+                                <div className="mt-4 pt-3 border-t border-gray-100">
+                                    <p className="text-xs font-semibold text-gray-500 mb-1">Fuentes Utilizadas (Google Search):</p>
+                                    <ul className="text-xs text-gray-600 list-disc list-inside space-y-1">
+                                        {response.sources.map((source, index) => (
+                                            <li key={index}>
+                                                <a href={source.uri} target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">{source.title}</a>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+
+        // --- MAIN APPLICATION COMPONENT ---
+
+        const App = () => {
+            const [view, setView] = useState(VIEWS.DASHBOARD);
+            const [userId, setUserId] = useState(null);
+            const [isAuthReady, setIsAuthReady] = useState(false);
+            const [groups, setGroups] = useState([]);
+            const [debts, setDebts] = useState([]);
+
+
+            // 1. Manejo de Autenticación y Carga Inicial
+            useEffect(() => {
+                const auth = window.firebase?.auth;
+                if (!auth) {
+                    // Caso para entorno local sin Firebase o carga tardía
+                    console.warn("Firebase Auth no disponible al inicio.");
+                    setUserId(generateRandomId());
+                    setIsAuthReady(true);
+                    return;
+                }
+
+                // Listener de estado de autenticación de Firebase
+                const unsubscribe = window.firebase.onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        setUserId(user.uid);
+                    } else {
+                        // En caso de que onAuthStateChanged no detecte user (raro si signInWithCustomToken fue llamado)
+                        // Forzamos un ID anónimo si no hay UID, para que las rutas de Firestore funcionen.
+                        setUserId(generateRandomId());
+                    }
+                    setIsAuthReady(true);
+                });
+
+                return () => unsubscribe();
+            }, []);
+            
+            // Función genérica para listeners de Firestore
+            const setupFirestoreListener = (collectionRef, setDataCallback, collectionName) => {
+                if (!collectionRef) return () => {}; // No hacer nada si la referencia es nula
+
+                const unsubscribe = window.firebase.onSnapshot(collectionRef, (snapshot) => {
+                    const dataList = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setDataCallback(dataList);
+                    console.log(`Firestore: Datos de ${collectionName} actualizados. Total: ${dataList.length}`);
+                }, (error) => {
+                    console.error(`Error en listener de ${collectionName}:`, error);
+                });
+                
+                return unsubscribe;
+            };
+
+            // 2. Listener de Grupos Colaborativos (Público)
+            useEffect(() => {
+                if (!isAuthReady) return;
+
+                const groupsRef = getPublicCollectionRef(COLLECTION_NAMES.GROUPS);
+                const unsubscribe = setupFirestoreListener(groupsRef, setGroups, COLLECTION_NAMES.GROUPS);
+
+                return () => unsubscribe();
+            }, [isAuthReady]);
+
+            // 3. Listener de Deudas Personales (Privado/Usuario)
+            useEffect(() => {
+                if (!isAuthReady || !userId) return;
+
+                const debtsRef = getPrivateCollectionRef(COLLECTION_NAMES.DEBTS, userId);
+                const unsubscribe = setupFirestoreListener(debtsRef, setDebts, COLLECTION_NAMES.DEBTS);
+
+                return () => unsubscribe();
+            }, [isAuthReady, userId]);
+
+            const renderContent = () => {
+                if (!isAuthReady) {
+                    return (
+                        <div className="text-center p-10 text-xl text-indigo-500">
+                            <Icon name="Loader" size={48} className="animate-spin mb-4 mx-auto" />
+                            Cargando aplicación y autenticación...
+                        </div>
+                    );
+                }
+
+                switch (view) {
+                    case VIEWS.DASHBOARD:
+                        return <Dashboard userId={userId} groups={groups} />;
+                    case VIEWS.DEBT_MANAGER:
+                        return <DebtManager userId={userId} debts={debts} />;
+                    case VIEWS.ADVISOR:
+                        return <Advisor userId={userId} />;
+                    default:
+                        return <Dashboard userId={userId} groups={groups} />;
+                }
+            };
+
+            return (
+                <div className="bg-gray-100 min-h-screen">
+                    <header className="bg-white shadow-md p-4 sticky top-0 z-10">
+                        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row justify-between items-center">
+                            <h1 className="text-2xl font-black text-indigo-800 mb-2 sm:mb-0 flex items-center">
+                                <Icon name="Pocket" size={28} className="mr-2 text-purple-500" /> Planificador Colaborativo
+                            </h1>
+                            <div className="text-xs text-gray-500 mt-2 sm:mt-0">
+                                Tu ID de Usuario (Para Colaborar):
+                                <span className="bg-yellow-100 text-yellow-800 p-1 rounded font-mono font-semibold ml-2 inline-block break-all">
+                                    {userId || "Cargando..."}
+                                </span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <nav className="sticky top-[72px] sm:top-[68px] bg-white shadow-lg p-2 z-10">
+                        <div className="max-w-4xl mx-auto flex justify-around space-x-2">
+                            <NavButton
+                                view={VIEWS.DASHBOARD}
+                                currentView={view}
+                                setView={setView}
+                                iconName="Home"
+                                label="Grupos"
+                            />
+                            <NavButton
+                                view={VIEWS.DEBT_MANAGER}
+                                currentView={view}
+                                setView={setView}
+                                iconName="TrendingDown"
+                                label="Deudas"
+                            />
+                            <NavButton
+                                view={VIEWS.ADVISOR}
+                                currentView={view}
+                                setView={setView}
+                                iconName="Bot"
+                                label="Asesor AI"
+                            />
+                            {/* Botón de Demo Premium */}
+                            <button
+                                className="flex-1 flex flex-col items-center justify-center p-2 rounded-xl transition-all duration-200 bg-green-500 text-white shadow-lg hover:bg-green-600"
+                                onClick={() => alert("Función Premium (Demo): Aquí podrías implementar funciones avanzadas como informes compartidos o estrategias automáticas de pago.")}
+                            >
+                                <Icon name="Crown" size={20} className="mb-0.5" />
+                                <span className="text-xs font-medium hidden sm:block">Activar Premium (Demo)</span>
+                            </button>
+                        </div>
+                    </nav>
+
+                    <main className="max-w-4xl mx-auto p-4 pb-10">
+                        {renderContent()}
+                    </main>
+
+                    <footer className="max-w-4xl mx-auto text-center p-4 text-xs text-gray-500 border-t mt-8">
+                        Desarrollado con React, Tailwind CSS y Google Gemini API | {new Date().getFullYear()}
+                    </footer>
+                    
+                </div>
+            );
+        };
+
+        // Renderizar la aplicación React
+        const container = document.getElementById('root');
+        const root = createRoot(container);
+        
+        // La aplicación se renderizará automáticamente, pero debemos asegurar que Babel procese el código.
+        // Se añade un pequeño retardo para asegurar que todos los scripts de Firebase se hayan cargado.
+        const checkFirebaseReady = setInterval(() => {
+            if (window.firebase) {
+                clearInterval(checkFirebaseReady);
+                root.render(<App />);
+                // Log level para debug de Firestore
+                if (window.firebase.db && window.firebase.db.setLogLevel) {
+                    // Nota: setLogLevel solo está disponible en versiones específicas del SDK
+                    console.log("Firebase listo.");
+                }
+            }
+        }, 100);
+
+    </script>
+</body>
+</html>
