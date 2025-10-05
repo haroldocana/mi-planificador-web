@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculadora Financiera PRO</title>
+    <!-- Carga de Tailwind CSS para estilos -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif; }
+        .input-style {
+            @apply w-full p-3 border border-gray-300 rounded-xl focus:ring-indigo-500 focus:border-indigo-500 transition duration-150;
+        }
+        .tab-button {
+            /* Estilo base */
+            @apply flex items-center justify-center space-x-2 py-3 px-4 mx-1 text-base sm:text-lg font-semibold text-gray-500 rounded-xl border-2 border-transparent hover:text-indigo-600 hover:border-indigo-300 transition duration-300 transform hover:scale-[1.02];
+        }
+        .tab-button.active {
+            /* Estilo activo mejorado: Sombra, color más fuerte y borde inferior */
+            @apply text-indigo-700 bg-white border-b-4 border-indigo-600 shadow-xl scale-100 ring-2 ring-indigo-300;
+        }
+        .content-section {
+            display: none;
+        }
+    </style>
+    
+    <!-- LÓGICA DE FIREBASE (Módulo) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, collection, onSnapshot, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variables globales y configuración
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        window.currentUserId = null;
+        window.currentUserEmail = "No autenticado";
+        window.isAuthReady = false;
+
+        // Inicialización de Firebase
+        try {
+            if (Object.keys(firebaseConfig).length > 0) {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+            } else {
+                console.error("Firebase config is missing or empty. La aplicación no usará almacenamiento persistente.");
+            }
+        } catch (e) {
+            console.error("Error al inicializar Firebase:", e);
+        }
+
+        // ----------------------------------------------------
+        // FÁBRICAS DE RUTAS DE FIRESTORE
+        // ----------------------------------------------------
+
+        function getCollectionRef(collectionName) {
+             // Verificamos que Firebase y Auth estén listos
+             if (!window.isAuthReady || !window.currentUserId || !db) return null;
+             // Ruta privada: /artifacts/{appId}/users/{userId}/{collectionName}
+             const path = `artifacts/${appId}/users/${window.currentUserId}/${collectionName}`;
+             return collection(db, path);
+        }
+
+        // ----------------------------------------------------
+        // LÓGICA DE LOGGING DE USUARIO
+        // ----------------------------------------------------
+
+        window.saveLogEvent = async function(eventType, details = {}) {
+            // Solo registramos si Firebase y el usuario están listos.
+            if (!window.currentUserId || !db) return; 
+
+            // Colección privada para logs: /artifacts/{appId}/users/{userId}/activity_log
+            const logColRef = collection(db, `artifacts/${appId}/users/${window.currentUserId}/activity_log`);
+            
+            const logData = {
+                userId: window.currentUserId,
+                email: window.currentUserEmail,
+                eventType: eventType, // e.g., 'REGISTER', 'LOGIN', 'LOGOUT'
+                details: details,
+                timestamp: new Date().toISOString(),
+            };
+
+            try {
+                await addDoc(logColRef, logData);
+                console.log(`Log guardado: ${eventType}`);
+            } catch (e) {
+                console.error("Error al guardar el log: ", e);
+            }
+        };
+
+        // ----------------------------------------------------
+        // LÓGICA DE AUTENTICACIÓN Y CARGA DE DATOS
+        // ----------------------------------------------------
+
+        if (auth) { // Solo iniciamos el listener si auth se inicializó correctamente
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    window.currentUserId = user.uid;
+                    window.currentUserEmail = user.email || "Usuario Anónimo";
+                    document.getElementById('user-email-display').textContent = window.currentUserEmail;
+                    document.getElementById('auth-status').textContent = `Conectado y listo.`;
+                    document.getElementById('auth-modal').classList.add('hidden');
+                    window.isAuthReady = true;
+                    
+                    // Cargar todas las colecciones al autenticar
+                    loadTransactions();
+                    loadLoans();
+                } else {
+                    window.isAuthReady = false;
+                    window.currentUserEmail = "No autenticado";
+                    document.getElementById('user-email-display').textContent = "Inicie Sesión";
+                    document.getElementById('auth-status').textContent = `Desconectado.`;
+                    document.getElementById('auth-modal').classList.remove('hidden');
+                    
+                    // Intento de autenticación anónima o con token inicial si están disponibles (para Canvas)
+                    try {
+                        if (initialAuthToken) {
+                            await signInWithCustomToken(auth, initialAuthToken);
+                        } else if (!user) {
+                            // Forzar el modal si no hay sesión ni token inicial válido
+                            console.log("No hay sesión activa, mostrando modal de autenticación.");
+                        }
+                    } catch (error) {
+                        console.error("Error de autenticación inicial:", error);
+                    }
+                }
+            });
+        } else {
+             // Si auth no está disponible
+            document.getElementById('user-email-display').textContent = "Config. Inválida";
+            document.getElementById('auth-status').textContent = `ERROR FATAL.`;
+        }
+
+
+        // ----------------------------------------------------
+        // LÓGICA DE AUTENTICACIÓN
+        // ----------------------------------------------------
+        
+        window.handleAuth = async function(e) {
+            e.preventDefault();
+            
+            // Verificación añadida: si 'auth' no se inicializó, salimos.
+            if (!auth) return window.alertModal("Error", "El servicio de autenticación no está disponible. Verifique la configuración.");
+
+            const form = e.target;
+            const email = form.elements.email.value;
+            const password = form.elements.password.value;
+            const action = form.elements.auth_action.value;
+            
+            try {
+                if (action === 'register') {
+                    await createUserWithEmailAndPassword(auth, email, password);
+                    window.alertModal("Éxito", "Usuario registrado e iniciado sesión correctamente.");
+                    // LOG de registro exitoso
+                    window.saveLogEvent('REGISTER', { email: email }); 
+                } else { // 'login'
+                    await signInWithEmailAndPassword(auth, email, password);
+                    window.alertModal("Éxito", "Sesión iniciada correctamente.");
+                    // LOG de inicio de sesión exitoso
+                    window.saveLogEvent('LOGIN', { email: email });
+                }
+            } catch (error) {
+                const errorMessage = error.message.includes('auth/weak-password') ? "La contraseña es muy débil." : "Error de autenticación. Verifique correo/contraseña.";
+                window.alertModal("Error de Acceso", errorMessage);
+                console.error("Auth Error:", error);
+            }
+        }
+        
+        window.userSignOut = async function() {
+             // Verificación añadida: si 'auth' no se inicializó, no hacemos nada.
+             if (!auth) return;
+
+             try {
+                // LOG de cierre de sesión antes de que el usuario pierda la sesión
+                window.saveLogEvent('LOGOUT');
+                await signOut(auth);
+                window.alertModal("Desconexión", "Has cerrado sesión correctamente.");
+             } catch (error) {
+                window.alertModal("Error", "No se pudo cerrar la sesión.");
+             }
+        }
+
+        // ----------------------------------------------------
+        // LÓGICA DE TRANSACCIONES (Ingresos/Gastos)
+        // ----------------------------------------------------
+
+        window.saveTransaction = async function(name, amount, type, category) {
+            if (!window.isAuthReady) return window.alertModal("Error", "Autenticación no lista o Firebase no inicializado.");
+            
+            const transactionsColRef = getCollectionRef('transactions');
+            if (!transactionsColRef) return window.alertModal("Error", "No se pudo acceder a la base de datos.");
+            
+            const transactionData = {
+                name,
+                amount: parseFloat(amount),
+                type, // 'income' o 'expense'
+                category,
+                timestamp: Date.now(),
+            };
+
+            try {
+                await addDoc(transactionsColRef, transactionData);
+                window.alertModal("Éxito", `${type === 'income' ? 'Ingreso' : 'Gasto'} guardado.`);
+            } catch (e) {
+                console.error("Error al guardar transacción: ", e);
+                window.alertModal("Error", "No se pudo guardar la transacción.");
+            }
+        };
+
+        function loadTransactions() {
+            const transactionsColRef = getCollectionRef('transactions');
+            if (!transactionsColRef) return;
+
+            onSnapshot(transactionsColRef, (snapshot) => {
+                let incomes = 0;
+                let expenses = 0;
+                const listEl = document.getElementById('transactions-list');
+                listEl.innerHTML = '';
+                let transactionArray = [];
+
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    data.id = doc.id;
+                    transactionArray.push(data);
+                    if (data.type === 'income') {
+                        incomes += data.amount;
+                    } else if (data.type === 'expense') {
+                        expenses += data.amount;
+                    }
+                });
+                
+                window.userIncomes = incomes;
+                window.userExpenses = expenses;
+
+                transactionArray.sort((a, b) => b.timestamp - a.timestamp);
+
+                transactionArray.forEach(data => {
+                    const typeClass = data.type === 'income' ? 'text-green-600' : 'text-red-600';
+                    const sign = data.type === 'income' ? '+' : '-';
+                    const date = new Date(data.timestamp).toLocaleDateString();
+                    
+                    const listItem = `
+                        <li class="flex justify-between items-center p-2 border-b last:border-b-0 hover:bg-gray-50 transition">
+                            <div>
+                                <p class="font-medium text-gray-800">${data.name} <span class="text-xs text-gray-500">(${data.category})</span></p>
+                                <p class="text-xs text-gray-400">${date}</p>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="font-bold ${typeClass}">${sign}$${data.amount.toFixed(2)}</span>
+                                <button onclick="deleteDocById('transactions', '${data.id}')" class="ml-2 p-1 rounded-full text-red-400 hover:text-red-600 hover:bg-red-100 transition duration-150">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd"/></svg>
+                                </button>
+                            </div>
+                        </li>
+                    `;
+                    listEl.innerHTML += listItem;
+                });
+
+                // Actualizar Dashboard
+                document.getElementById('total-incomes').textContent = `$${incomes.toFixed(2)}`;
+                document.getElementById('total-expenses').textContent = `$${expenses.toFixed(2)}`;
+                
+                // Actualizar Flujo Neto y Chart
+                const netFlow = incomes - expenses;
+                const netFlowEl = document.getElementById('net-flow');
+                netFlowEl.textContent = `$${netFlow.toFixed(2)}`;
+                netFlowEl.classList.remove('text-yellow-800', 'text-green-800', 'text-red-800');
+                if (netFlow > 0) {
+                    netFlowEl.classList.add('text-green-800');
+                } else if (netFlow < 0) {
+                    netFlowEl.classList.add('text-red-800');
+                } else {
+                    netFlowEl.classList.add('text-yellow-800');
+                }
+                
+                renderDashboardChart(incomes, expenses);
+
+            }, (error) => {
+                console.error("Error al cargar transacciones: ", error);
+            });
+        }
+
+        // ----------------------------------------------------
+        // LÓGICA DE PRÉSTAMOS/CRÉDITOS
+        // ----------------------------------------------------
+
+        window.saveLoan = async function(data) {
+            if (!window.isAuthReady) return window.alertModal("Error", "Autenticación no lista o Firebase no inicializado.");
+            
+            const loansColRef = getCollectionRef('loans');
+            if (!loansColRef) return window.alertModal("Error", "No se pudo acceder a la base de datos.");
+            
+            try {
+                await addDoc(loansColRef, data);
+                window.alertModal("Éxito", `Préstamo "${data.name}" guardado.`);
+            } catch (e) {
+                console.error("Error al guardar préstamo: ", e);
+                window.alertModal("Error", "No se pudo guardar el préstamo.");
+            }
+        };
+
+        function loadLoans() {
+            const loansColRef = getCollectionRef('loans');
+            if (!loansColRef) return;
+
+            onSnapshot(loansColRef, (snapshot) => {
+                const listEl = document.getElementById('loans-list');
+                listEl.innerHTML = '';
+                
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    data.id = doc.id;
+                    
+                    const remainingBalance = data.totalAmount - data.paidAmount;
+                    const paymentsRemaining = data.totalPayments - data.paymentsMade;
+                    const statusColor = remainingBalance > 0 ? 'text-red-600' : 'text-green-600';
+                    const paymentsColor = paymentsRemaining > 0 ? 'text-gray-600' : 'text-green-600';
+
+                    const listItem = `
+                        <div class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm mb-3 flex justify-between items-center hover:shadow-md transition duration-200">
+                            <div>
+                                <p class="text-lg font-semibold text-gray-800">${data.name}</p>
+                                <p class="text-sm text-gray-500">Monto Original: $${data.totalAmount.toFixed(2)} | Pagado: $${data.paidAmount.toFixed(2)}</p>
+                                <p class="text-xs text-gray-400">Pago mensual est.: $${data.paymentAmount.toFixed(2)}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-xl font-bold ${statusColor}">Saldo Pendiente: $${remainingBalance.toFixed(2)}</p>
+                                <p class="text-sm ${paymentsColor}">Pagos restantes: ${paymentsRemaining}</p>
+                            </div>
+                            <button onclick="deleteDocById('loans', '${data.id}')" class="ml-4 p-2 rounded-full text-red-400 hover:text-red-600 hover:bg-red-100 transition duration-150">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clip-rule="evenodd"/></svg>
+                            </button>
+                        </div>
+                    `;
+                    listEl.innerHTML += listItem;
+                });
+
+                if (snapshot.empty) {
+                    listEl.innerHTML = '<p class="text-center text-gray-500 p-6">No hay préstamos registrados.</p>';
+                }
+            }, (error) => {
+                console.error("Error al cargar préstamos: ", error);
+            });
+        }
+        
+        // Función general para eliminar documentos
+        window.deleteDocById = async function(collectionName, docId) {
+            if (!window.isAuthReady) return window.alertModal("Error", "Autenticación no lista o Firebase no inicializado.");
+            
+            const colRef = getCollectionRef(collectionName);
+            if (!colRef) return window.alertModal("Error", "No se pudo acceder a la base de datos.");
+            
+            try {
+                await deleteDoc(doc(colRef, docId));
+                window.alertModal("Eliminado", "Documento eliminado con éxito.");
+            } catch (e) {
+                console.error("Error al eliminar documento: ", e);
+                window.alertModal("Error", "No se pudo eliminar el documento.");
+            }
+        }
+        
+    </script>
+    
+    <!-- LÓGICA DEL SCRIPT PRINCIPAL (Módulo) -->
+    <script type="module">
+        // Se asegura de que las variables globales estén accesibles
+        if (typeof window.isAuthReady === 'undefined') {
+            window.isAuthReady = false;
+        }
+        
+        // ----------------------------------------------------
+        // LÓGICA DE UI Y CONTROL DE TABS
+        // ----------------------------------------------------
+        window.currentTab = 'dashboard';
+        
+        document.addEventListener('DOMContentLoaded', () => {
+             // Inicializar la vista
+             window.showTab(window.currentTab);
+             
+             // Setup Event Listeners
+             document.getElementById('auth-form').addEventListener('submit', window.handleAuth); // Manejar formulario de autenticación
+             document.getElementById('transaction-form').addEventListener('submit', handleTransactionSubmit);
+             document.getElementById('loan-form').addEventListener('submit', handleLoanSubmit);
+             document.getElementById('interest-form').addEventListener('submit', handleInterestSubmit);
+             document.getElementById('ai-form').addEventListener('submit', handleAiSubmit);
+
+        });
+
+        window.showTab = function(tabName) {
+            window.currentTab = tabName;
+            
+            // Ocultar todas las secciones
+            document.querySelectorAll('.content-section').forEach(section => {
+                section.style.display = 'none';
+            });
+
+            // Desactivar todos los botones
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+
+            // Mostrar la sección y activar el botón
+            document.getElementById(`${tabName}-section`).style.display = 'block';
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        // ----------------------------------------------------
+        // LÓGICA DE FORMULARIOS Y CÁLCULOS
+        // ----------------------------------------------------
+        
+        function handleTransactionSubmit(e) {
+            e.preventDefault();
+            const form = e.target;
+            const type = form.elements.transaction_type.value;
+            const name = form.elements.name.value;
+            const amount = form.elements.amount.value;
+            const category = form.elements.category.value;
+            
+            if (name && amount > 0) {
+                window.saveTransaction(name, amount, type, category);
+                form.reset();
+                form.elements.transaction_type.value = 'expense'; 
+            } else {
+                window.alertModal("Error", "Por favor, complete todos los campos.");
+            }
+        }
+        
+        function handleLoanSubmit(e) {
+            e.preventDefault();
+            const form = e.target;
+            const totalAmount = parseFloat(form.elements.loan_total_amount.value);
+            const paidAmount = parseFloat(form.elements.loan_paid_amount.value);
+            const totalPayments = parseInt(form.elements.loan_total_payments.value);
+            const paymentsMade = parseInt(form.elements.loan_payments_made.value);
+            const paymentAmount = parseFloat(form.elements.loan_payment_amount.value);
+            const name = form.elements.loan_name.value;
+
+            if (totalAmount > 0 && totalPayments > 0 && paidAmount >= 0 && paymentsMade >= 0 && name && paymentAmount > 0) {
+                if (paidAmount > totalAmount || paymentsMade > totalPayments) {
+                     window.alertModal("Advertencia", "Los valores de pago/pagos realizados superan el total, pero se guardarán.");
+                }
+                
+                const loanData = {
+                    name,
+                    totalAmount,
+                    paidAmount,
+                    totalPayments,
+                    paymentsMade,
+                    paymentAmount,
+                    timestamp: Date.now(),
+                };
+                
+                window.saveLoan(loanData);
+                form.reset();
+            } else {
+                window.alertModal("Error", "Por favor, asegúrese de que todos los campos de monto y pagos sean válidos y positivos.");
+            }
+        }
+        
+        let lastCalculation = null; 
+
+        function handleInterestSubmit(e) {
+            e.preventDefault();
+            const P = parseFloat(document.getElementById('principal').value);
+            const r = parseFloat(document.getElementById('rate').value) / 100;
+            const t = parseInt(document.getElementById('time').value);
+            const n = parseInt(document.getElementById('compounds').value);
+            
+            if (isNaN(P) || isNaN(r) || isNaN(t) || isNaN(n) || P <= 0) {
+                window.alertModal("Error de Entrada", "Por favor, introduzca valores válidos y positivos para el cálculo.");
+                return;
+            }
+
+            const futureValue = P * Math.pow((1 + r / n), (n * t));
+            const interestEarned = futureValue - P;
+
+            document.getElementById('future-value-display').textContent = `$${futureValue.toFixed(2)}`;
+            document.getElementById('interest-earned-display').textContent = `$${interestEarned.toFixed(2)}`;
+            document.getElementById('interest-results-card').classList.remove('hidden');
+
+            lastCalculation = {
+                result: futureValue,
+                inputs: { principal: P, rate: r * 100, time: t, compounds: n }
+            };
+        }
+        
+        window.saveCurrentCalculation = function() {
+            if (lastCalculation) {
+                // Función de guardar en Firestore (mantiene la estructura por si se habilita)
+                window.alertModal("Función Deshabilitada", "La función de guardar la inversión de Interés Compuesto está deshabilitada en esta versión.");
+            } else {
+                window.alertModal("Error de Guardado", "Primero debe realizar un cálculo para poder guardarlo.");
+            }
+        }
+        
+        // ----------------------------------------------------
+        // LÓGICA DE GRÁFICO (DASHBOARD)
+        // ----------------------------------------------------
+
+        window.renderDashboardChart = function(incomes, expenses) {
+            const chart = document.getElementById('dashboard-chart');
+            const netFlow = incomes - expenses;
+            const total = incomes + expenses;
+            
+            if (total === 0) {
+                 chart.innerHTML = '<p class="text-center text-gray-500 py-4">No hay datos suficientes para el gráfico. ¡Empieza a registrar!</p>';
+                 return;
+            }
+
+            const incomePct = (incomes / total) * 100;
+            const expensePct = (expenses / total) * 100;
+            
+            let netFlowText = `<p class="text-xl font-bold mt-4 ${netFlow >= 0 ? 'text-green-600' : 'text-red-600'}">Flujo Neto: $${netFlow.toFixed(2)} (${netFlow >= 0 ? 'Superávit' : 'Déficit'})</p>`;
+
+            chart.innerHTML = `
+                <div class="flex flex-col space-y-2">
+                    <div class="flex justify-between text-sm font-medium">
+                        <span class="text-green-600">Ingresos (${incomePct.toFixed(1)}%)</span>
+                        <span class="text-red-600">Gastos (${expensePct.toFixed(1)}%)</span>
+                    </div>
+                    <div class="flex h-8 rounded-lg overflow-hidden shadow-lg border border-gray-100">
+                        <div style="width: ${incomePct}%;" class="bg-green-500 transition-all duration-500 ease-out"></div>
+                        <div style="width: ${expensePct}%;" class="bg-red-500 transition-all duration-500 ease-out"></div>
+                    </div>
+                </div>
+                ${netFlowText}
+            `;
+        }
+
+        // ----------------------------------------------------
+        // LÓGICA DEL ASESOR IA (GEMINI API)
+        // ----------------------------------------------------
+
+        async function handleAiSubmit(e) {
+            e.preventDefault();
+            if (!window.isAuthReady) {
+                 window.alertModal("Acceso Denegado", "Debe iniciar sesión para usar el Asesor IA.");
+                 return;
+            }
+            const prompt = document.getElementById('ai-prompt').value;
+            if (!prompt) {
+                window.alertModal("Error", "Por favor, escriba su consulta financiera.");
+                return;
+            }
+            
+            const aiOutput = document.getElementById('ai-output');
+            const aiButton = document.getElementById('ai-submit-button');
+            const aiLoader = document.getElementById('ai-loader');
+
+            aiOutput.innerHTML = '';
+            aiButton.disabled = true;
+            aiButton.textContent = 'Generando recomendación...';
+            aiLoader.classList.remove('hidden');
+
+            const systemPrompt = `Actúa como un asesor financiero personal experto y amigable. Tu objetivo es proporcionar una recomendación concisa y accionable. Analiza la situación financiera del usuario y responde a su consulta. Si el usuario tiene datos de Ingresos/Gastos, úsalos para contextualizar tu respuesta. Sé profesional y utiliza español formal.`;
+            
+            const financialData = window.isAuthReady ? 
+                `Ingresos Totales Registrados: $${(window.userIncomes || 0).toFixed(2)}. Gastos Totales Registrados: $${(window.userExpenses || 0).toFixed(2)}. Flujo Neto: $${((window.userIncomes || 0) - (window.userExpenses || 0)).toFixed(2)}. Usa esta información para contextualizar.` 
+                : "No se encontró información de Ingresos/Gastos. Responde basándote solo en la consulta del usuario.";
+
+            const userQuery = `Consulta del Usuario: "${prompt}". Contexto de Datos: ${financialData}`;
+
+            const apiKey = ""; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            const maxRetries = 3;
+            let retryCount = 0;
+            
+            const fetchWithRetry = async () => {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && retryCount < maxRetries) {
+                            retryCount++;
+                            const delay = Math.pow(2, retryCount) * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            return fetchWithRetry();
+                        }
+                        throw new Error(`Error HTTP: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const candidate = result.candidates?.[0];
+
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        let text = candidate.content.parts[0].text;
+                        let sources = [];
+                        const groundingMetadata = candidate.groundingMetadata;
+
+                        if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                            sources = groundingMetadata.groundingAttributions
+                                .map(attribution => ({
+                                    uri: attribution.web?.uri,
+                                    title: attribution.web?.title,
+                                }))
+                                .filter(source => source.uri && source.title);
+                        }
+
+                        let htmlOutput = `<div class="p-4 bg-indigo-50 border-l-4 border-indigo-500 rounded-lg shadow-inner">
+                                            <h4 class="text-lg font-bold text-indigo-700 mb-2">Respuesta del Asesor:</h4>
+                                            <p class="text-gray-700 whitespace-pre-wrap">${text}</p>
+                                          </div>`;
+                        
+                        if (sources.length > 0) {
+                            htmlOutput += `<div class="mt-4 p-3 bg-gray-100 rounded-lg">
+                                             <h5 class="text-sm font-semibold text-gray-600 mb-1">Fuentes (Grounding):</h5>
+                                             <ul class="list-disc list-inside text-xs text-gray-500 space-y-1">`;
+                            sources.slice(0, 3).forEach(s => {
+                                htmlOutput += `<li><a href="${s.uri}" target="_blank" class="text-indigo-500 hover:underline">${s.title || s.uri}</a></li>`;
+                            });
+                            htmlOutput += `</ul></div>`;
+                        }
+
+                        aiOutput.innerHTML = htmlOutput;
+                    } else {
+                        aiOutput.innerHTML = '<p class="text-red-500">Error: No se pudo generar la recomendación. Inténtelo de nuevo.</p>';
+                    }
+                } catch (error) {
+                    console.error("Error en la llamada a la API:", error);
+                    aiOutput.innerHTML = `<p class="text-red-500">Error en el servidor o la red: ${error.message}</p>`;
+                } finally {
+                    aiButton.disabled = false;
+                    aiButton.textContent = 'Obtener Recomendación';
+                    aiLoader.classList.add('hidden');
+                }
+            };
+            
+            fetchWithRetry();
+        }
+        
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 sm:p-8">
+
+    <!-- Modal para Alertas -->
+    <div id="alert-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-sm">
+            <h3 id="modal-title" class="text-xl font-bold mb-3 text-indigo-700"></h3>
+            <p id="modal-message" class="text-gray-600 mb-4"></p>
+            <button onclick="closeAlertModal()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-lg transition duration-200">
+                Entendido
+            </button>
+        </div>
+    </div>
+    
+    <script>
+        window.alertModal = function(title, message) {
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-message').textContent = message;
+            document.getElementById('alert-modal').classList.remove('hidden');
+            document.getElementById('alert-modal').classList.add('flex');
+        }
+        window.closeAlertModal = function() {
+            document.getElementById('alert-modal').classList.add('hidden');
+            document.getElementById('alert-modal').classList.remove('flex');
+        }
+        
+        // Función para alternar entre Login y Register
+        window.toggleAuthMode = function(mode) {
+             const title = document.getElementById('auth-modal-title');
+             const button = document.getElementById('auth-submit-button');
+             const actionInput = document.getElementById('auth-action');
+             const toggleLink = document.getElementById('auth-toggle-link');
+
+             if (mode === 'register') {
+                 title.textContent = 'Crear Cuenta (Registro)';
+                 button.textContent = 'Registrar y Acceder';
+                 actionInput.value = 'register';
+                 toggleLink.innerHTML = '¿Ya tienes cuenta? <span class="font-bold text-indigo-600 hover:underline">Iniciar Sesión</span>';
+                 toggleLink.onclick = () => toggleAuthMode('login');
+             } else {
+                 title.textContent = 'Iniciar Sesión';
+                 button.textContent = 'Acceder';
+                 actionInput.value = 'login';
+                 toggleLink.innerHTML = '¿No tienes cuenta? <span class="font-bold text-indigo-600 hover:underline">Regístrate</span>';
+                 toggleLink.onclick = () => toggleAuthMode('register');
+             }
+        }
+    </script>
+    
+    <!-- Modal de Autenticación (se muestra si no hay sesión) -->
+    <div id="auth-modal" class="fixed inset-0 bg-indigo-900 bg-opacity-95 hidden items-center justify-center z-50">
+        <div class="bg-white p-8 rounded-xl shadow-2xl w-full max-w-md transform transition-all">
+            <h3 id="auth-modal-title" class="text-3xl font-extrabold mb-6 text-indigo-700 text-center">
+                Crear Cuenta (Registro)
+            </h3>
+            
+            <form id="auth-form" onsubmit="handleAuth(event)" class="space-y-4">
+                <div>
+                    <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Correo Electrónico</label>
+                    <input type="email" id="email" name="email" class="input-style" placeholder="tu.correo@ejemplo.com" required>
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-700 mb-1">Contraseña</label>
+                    <input type="password" id="password" name="password" class="input-style" placeholder="Mínimo 6 caracteres" required>
+                </div>
+                
+                <input type="hidden" id="auth-action" name="auth_action" value="register">
+                
+                <button id="auth-submit-button" type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition duration-200 shadow-md">
+                    Registrar y Acceder
+                </button>
+            </form>
+            
+            <p class="mt-4 text-center text-sm text-gray-500">
+                <a href="#" id="auth-toggle-link" onclick="toggleAuthMode('login')" class="cursor-pointer">
+                    ¿Ya tienes cuenta? <span class="font-bold text-indigo-600 hover:underline">Iniciar Sesión</span>
+                </a>
+            </p>
+        </div>
+    </div>
+    <script>
+        // Inicializa el modo del modal al cargar la página
+        document.addEventListener('DOMContentLoaded', () => {
+            // Se inicializa en 'register' (registro) para que el usuario cree su cuenta primero
+            window.toggleAuthMode('register'); 
+        });
+    </script>
+
+    <div class="max-w-6xl mx-auto">
+        <header class="text-center mb-6">
+            <div class="flex justify-between items-center pb-4 border-b border-gray-200">
+                <h1 class="text-4xl font-extrabold text-indigo-800 text-left">
+                    💰 Gestión Financiera PRO
+                </h1>
+                <div class="text-right">
+                    <p class="mt-2 text-md font-semibold text-gray-700">
+                        Usuario: <span id="user-email-display" class="text-indigo-600">Inicie Sesión</span>
+                    </p>
+                    <p class="text-xs text-gray-500">
+                        Estado: <span id="auth-status">Desconectado.</span>
+                    </p>
+                    <button onclick="userSignOut()" class="mt-2 text-xs bg-red-500 hover:bg-red-600 text-white py-1 px-3 rounded-full transition duration-200" title="Cerrar Sesión">
+                         Cerrar Sesión
+                    </button>
+                </div>
+            </div>
+            <p class="mt-1 text-xs text-gray-400 text-right">
+                 Creado por **Harold Benjamin Ocaña**
+            </p>
+        </header>
+
+        <!-- Navegación por Pestañas Gráfica -->
+        <nav class="flex justify-center border-b-0 mb-8 sticky top-0 z-10 bg-gray-50">
+            <button id="tab-dashboard" onclick="showTab('dashboard')" class="tab-button active">
+                <!-- Icono actualizado: BarChart3 -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 20L10 14"/><path d="M4 20L4 10"/><path d="M16 20L16 4"/><path d="M22 20L22 16"/></svg>
+                <span>Dashboard</span>
+            </button>
+            <button id="tab-interest" onclick="showTab('interest')" class="tab-button">
+                 <!-- Icono actualizado: TrendingUp -->
+                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/><circle cx="12" cy="12" r="10"/></svg>
+                <span>Interés Compuesto</span>
+            </button>
+            <button id="tab-loans" onclick="showTab('loans')" class="tab-button">
+                <!-- Icono actualizado: CreditCard -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>
+                <span>Créditos y Deudas</span>
+            </button>
+            <button id="tab-ai" onclick="showTab('ai')" class="tab-button">
+                <!-- Icono actualizado: Sparkles -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.5V22M12 2h0.5M4.5 17.5h1M19.5 6.5h1M4 12H2.5M21 12h-1M12 21.5v-1M12 2.5v1M4.5 17.5l-1 1M20.5 5.5l1 1M3.5 6.5l1 1M19.5 17.5l1 1M7.5 16.5l1-1M15.5 8.5l1-1M7.5 7.5l1-1M15.5 16.5l1-1M7.5 7.5l1 1M15.5 16.5l1 1M7.5 16.5l1 1M15.5 8.5l1 1M4.5 17.5L5.5 16.5M19.5 6.5L18.5 7.5M4.5 6.5L5.5 7.5M19.5 17.5L18.5 16.5"/></svg>
+                <span>Asesor IA</span>
+            </button>
+        </nav>
+        
+        <main class="pt-4">
+
+        <!-- ---------------------------------------------------------------------------------- -->
+        <!-- 1. DASHBOARD DE INGRESOS Y GASTOS -->
+        <!-- ---------------------------------------------------------------------------------- -->
+        <section id="dashboard-section" class="content-section grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- Panel de Ingreso de Transacciones -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-xl h-fit border border-indigo-100">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-3 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="20" y2="10"/><line x1="18" x2="18" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="16"/></svg>
+                    Registro de Transacciones
+                </h2>
+                
+                <form id="transaction-form" class="space-y-4">
+                    <!-- Tipo de Transacción -->
+                    <div>
+                        <label for="transaction_type" class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                        <select id="transaction_type" name="transaction_type" class="input-style bg-white" required>
+                            <option value="expense">Gasto</option>
+                            <option value="income">Ingreso</option>
+                        </select>
+                    </div>
+
+                    <!-- Nombre de Transacción -->
+                    <div>
+                        <label for="name" class="block text-sm font-medium text-gray-700 mb-1">Nombre / Descripción</label>
+                        <input type="text" id="name" name="name" placeholder="Ej: Pago de alquiler, Salario" class="input-style" required>
+                    </div>
+                    
+                    <!-- Monto -->
+                    <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700 mb-1">Monto ($)</label>
+                        <input type="number" id="amount" name="amount" min="0.01" step="0.01" placeholder="0.00" class="input-style" required>
+                    </div>
+
+                    <!-- Categoría (Predeterminadas) -->
+                    <div>
+                        <label for="category" class="block text-sm font-medium text-gray-700 mb-1">Categoría</label>
+                        <select id="category" name="category" class="input-style bg-white" required>
+                            <option value="Vivienda">Vivienda (Alquiler, Hipoteca)</option>
+                            <option value="Alimentos">Alimentos (Comestibles, Restaurantes)</option>
+                            <option value="Transporte">Transporte</option>
+                            <option value="Servicios">Servicios (Luz, Agua, Internet)</option>
+                            <option value="Entretenimiento">Entretenimiento</option>
+                            <option value="Deudas">Deudas (Pagos mínimos)</option>
+                            <option value="Salario">Salario</option>
+                            <option value="Extra">Ingreso Extra</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition duration-200 shadow-md">
+                        Guardar Transacción
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Panel de Dashboard (Gráfico y Totales) -->
+            <div class="lg:col-span-2 space-y-8">
+                <!-- Tarjetas de Resumen -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-green-100 p-5 rounded-xl shadow-lg border-l-4 border-green-500">
+                        <p class="text-sm font-medium text-green-700">Total Ingresos</p>
+                        <p id="total-incomes" class="text-3xl font-bold text-green-800 mt-1">$0.00</p>
+                    </div>
+                    <div class="bg-red-100 p-5 rounded-xl shadow-lg border-l-4 border-red-500">
+                        <p class="text-sm font-medium text-red-700">Total Gastos</p>
+                        <p id="total-expenses" class="text-3xl font-bold text-red-800 mt-1">$0.00</p>
+                    </div>
+                    <div class="bg-indigo-100 p-5 rounded-xl shadow-lg border-l-4 border-indigo-500">
+                        <p class="text-sm font-medium text-indigo-700">Flujo Neto</p>
+                        <p id="net-flow" class="text-3xl font-bold text-yellow-800 mt-1">--</p>
+                    </div>
+                </div>
+
+                <!-- Gráfico (Barra simple con Tailwind) -->
+                <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Dashboard Gráfico (Proporción Ingresos vs. Gastos)</h3>
+                    <div id="dashboard-chart" class="h-auto">
+                        <p class="text-center text-gray-500 py-4">Añade transacciones para ver el gráfico.</p>
+                    </div>
+                </div>
+                
+                <!-- Lista de Transacciones Recientes -->
+                <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                    <h3 class="text-xl font-bold text-gray-800 mb-4">Transacciones Recientes</h3>
+                    <ul id="transactions-list" class="divide-y divide-gray-100">
+                        <li class="p-2 text-center text-gray-500 text-sm">Cargando transacciones...</li>
+                    </ul>
+                </div>
+
+            </div>
+        </section>
+
+
+        <!-- ---------------------------------------------------------------------------------- -->
+        <!-- 2. CALCULADORA DE INTERÉS COMPUESTO -->
+        <!-- ---------------------------------------------------------------------------------- -->
+        <section id="interest-section" class="content-section grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div class="bg-white p-6 rounded-xl shadow-xl border border-indigo-100 h-fit">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-3 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-.8.8-1.4 1.6-1.8.8-.3 1.6-.2 2.2.2.6.4 1.1 1.1 1.2 1.8"/><path d="M21 17.5c-.8.5-1.7.5-2.5 0-.8-.5-1.6-1.5-1.6-2.4 0-.8.8-1.8 1.6-2.4.8-.5 1.7-.5 2.5 0"/><circle cx="12" cy="12" r="10"/><path d="M12 18V6"/><path d="M15 9.5l-3-3-3 3"/></svg>
+                    Fórmula de Interés Compuesto
+                </h2>
+                <p class="text-sm text-gray-500 mb-4">
+                     Fórmula: $$A = P \left(1 + \frac{r}{n}\right)^{nt}$$
+                </p>
+                <form id="interest-form" class="space-y-4">
+                    <div>
+                        <label for="principal" class="block text-sm font-medium text-gray-700 mb-1">Capital Inicial (P)</label>
+                        <input type="number" id="principal" value="10000" min="0" class="input-style" required>
+                    </div>
+                    <div>
+                        <label for="rate" class="block text-sm font-medium text-gray-700 mb-1">Tasa Anual (%) (r)</label>
+                        <input type="number" id="rate" value="7" min="0" step="0.01" class="input-style" required>
+                    </div>
+                    <div>
+                        <label for="time" class="block text-sm font-medium text-gray-700 mb-1">Años (t)</label>
+                        <input type="number" id="time" value="20" min="1" class="input-style" required>
+                    </div>
+                    <div>
+                        <label for="compounds" class="block text-sm font-medium text-gray-700 mb-1">Veces Compuesto por Año (n)</label>
+                        <select id="compounds" class="input-style bg-white" required>
+                            <option value="12" selected>12 (Mensual)</option>
+                            <option value="1">1 (Anual)</option>
+                            <option value="4">4 (Trimestral)</option>
+                            <option value="365">365 (Diario)</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition duration-200 shadow-md">
+                        Calcular Valor Futuro
+                    </button>
+                </form>
+                
+                <div id="interest-results-card" class="mt-6 p-4 border-t-2 border-indigo-200 hidden bg-indigo-50 rounded-lg">
+                    <h3 class="text-xl font-semibold text-gray-800 mb-2">Resultado de la Inversión:</h3>
+                    <p class="text-3xl font-extrabold text-green-600 mb-4">
+                        Valor Futuro (A): <span id="future-value-display">$0.00</span>
+                    </p>
+                    <p class="text-md text-gray-600">
+                        Intereses Ganados: <span id="interest-earned-display" class="font-medium text-amber-600">$0.00</span>
+                    </p>
+                </div>
+            </div>
+             <div class="bg-gray-100 p-6 rounded-xl shadow-inner border border-gray-200">
+                <h3 class="text-xl font-bold text-gray-700 mb-4">Potencial del Interés Compuesto</h3>
+                <p class="text-gray-600 text-sm">
+                    Esta herramienta te ayuda a visualizar cómo una inversión crece con el tiempo, reinvirtiendo las ganancias. Es fundamental para planificar el **ahorro para el retiro** o cualquier **meta financiera a largo plazo**. ¡La paciencia es tu mayor activo!
+                </p>
+            </div>
+        </section>
+
+
+        <!-- ---------------------------------------------------------------------------------- -->
+        <!-- 3. GESTIÓN DE CRÉDITOS Y DEUDAS -->
+        <!-- ---------------------------------------------------------------------------------- -->
+        <section id="loans-section" class="content-section grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- Formulario de Ingreso de Préstamo -->
+            <div class="bg-white p-6 rounded-xl shadow-xl h-fit border border-indigo-100">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-3 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V10z"/><path d="M16 10V6a4 4 0 0 0-4-4v0a4 4 0 0 0-4 4v4"/></svg>
+                    Registrar Nuevo Crédito/Deuda
+                </h2>
+                
+                <form id="loan-form" class="space-y-4">
+                    <div>
+                        <label for="loan_name" class="block text-sm font-medium text-gray-700 mb-1">Nombre del Crédito</label>
+                        <input type="text" id="loan_name" name="loan_name" placeholder="Ej: Hipoteca, Tarjeta VISA" class="input-style" required>
+                    </div>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="loan_total_amount" class="block text-sm font-medium text-gray-700 mb-1">Monto Total ($)</label>
+                            <input type="number" id="loan_total_amount" name="loan_total_amount" min="0" step="0.01" class="input-style" required>
+                        </div>
+                        <div>
+                            <label for="loan_paid_amount" class="block text-sm font-medium text-gray-700 mb-1">Monto Pagado ($)</label>
+                            <input type="number" id="loan_paid_amount" name="loan_paid_amount" value="0" min="0" step="0.01" class="input-style" required>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <label for="loan_total_payments" class="block text-sm font-medium text-gray-700 mb-1">Total Pagos (Meses)</label>
+                            <input type="number" id="loan_total_payments" name="loan_total_payments" min="1" class="input-style" required>
+                        </div>
+                        <div>
+                            <label for="loan_payments_made" class="block text-sm font-medium text-gray-700 mb-1">Pagos Realizados</label>
+                            <input type="number" id="loan_payments_made" name="loan_payments_made" value="0" min="0" class="input-style" required>
+                        </div>
+                        <div>
+                            <label for="loan_payment_amount" class="block text-sm font-medium text-gray-700 mb-1">Monto Pago Mensual</label>
+                            <input type="number" id="loan_payment_amount" name="loan_payment_amount" min="0.01" step="0.01" class="input-style" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition duration-200 shadow-md">
+                        Añadir Crédito
+                    </button>
+                </form>
+            </div>
+            
+            <!-- Lista de Créditos Activos -->
+            <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                <h2 class="text-2xl font-bold text-gray-800 mb-6 border-b pb-3 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    Deudas y Créditos Activos
+                </h2>
+                <div id="loans-list" class="space-y-3">
+                    <p class="text-center text-gray-500 p-6">Cargando préstamos...</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ---------------------------------------------------------------------------------- -->
+        <!-- 4. ASESOR FINANCIERO IA -->
+        <!-- ---------------------------------------------------------------------------------- -->
+        <section id="ai-section" class="content-section max-w-3xl mx-auto">
+            <div class="bg-white p-6 rounded-xl shadow-xl border border-indigo-100">
+                <h2 class="text-2xl font-bold text-indigo-700 mb-4 border-b pb-3 flex items-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2 text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V5H6.5A2.5 2.5 0 0 0 4 7.5v12z"/><path d="M12 13h4"/><path d="M12 17h4"/></svg>
+                    Asesor Financiero con Inteligencia Artificial
+                </h2>
+                <p class="text-gray-600 mb-6 text-sm">
+                    El asesor IA utiliza **Gemini** y **Google Search** para brindarte consejos. Tus datos de Ingresos/Gastos son usados como contexto para la recomendación.
+                </p>
+                
+                <form id="ai-form" class="space-y-4 mb-6">
+                    <div>
+                        <label for="ai-prompt" class="block text-sm font-medium text-gray-700 mb-1">Tu Consulta Financiera</label>
+                        <textarea id="ai-prompt" rows="4" placeholder="Ej: ¿Cuál es el mejor fondo de inversión para mi superávit de $500? ¿Cómo puedo consolidar mis deudas?" class="input-style" required></textarea>
+                    </div>
+                    
+                    <button id="ai-submit-button" type="submit" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-xl transition duration-200 shadow-md">
+                        Obtener Recomendación
+                    </button>
+                </form>
+
+                <!-- Área de Salida de la IA -->
+                <div id="ai-output" class="mt-8 space-y-4 min-h-[100px]">
+                    <p class="text-center text-gray-500">Aquí aparecerá la recomendación de tu Asesor IA.</p>
+                    <div id="ai-loader" class="hidden text-center">
+                        <svg class="animate-spin h-5 w-5 text-indigo-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <p class="text-sm text-indigo-500 mt-2">Buscando y analizando...</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        </main>
+    </div>
+</body>
+</html>
+
