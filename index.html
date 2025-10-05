@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificador Financiero Pro (IA + Gráficos)</title>
+    <!-- Carga de Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carga de Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* gray-50 */
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background-color: #f1f5f9; }
+        #root { min-height: 100vh; }
+        .loader {
+            border: 4px solid #e5e7eb;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Estilo para el consejo de la IA */
+        .ai-advice blockquote {
+            border-left: 4px solid #3b82f6;
+            padding-left: 1rem;
+            margin: 1rem 0;
+            font-style: italic;
+            color: #4b5563;
+        }
+        .ai-advice ul {
+            list-style-type: disc;
+            padding-left: 2rem;
+        }
+    </style>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide-react@0.320.0/dist/lucide-react.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+        
+        window.firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        window.initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        window.appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        window.initializeFirebase = async () => {
+            try {
+                const app = initializeApp(window.firebaseConfig);
+                const db = getFirestore(app);
+                const auth = getAuth(app);
+
+                if (window.initialAuthToken) {
+                    await signInWithCustomToken(auth, window.initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                window.db = db;
+                window.auth = auth;
+                window.doc = doc;
+                window.setDoc = setDoc;
+                window.onSnapshot = onSnapshot;
+                window.collection = collection;
+                window.onAuthStateChanged = onAuthStateChanged;
+                
+                console.log("Firebase inicializado y autenticación completada.");
+                return true;
+            } catch (error) {
+                console.error("Error crítico al inicializar Firebase:", error);
+                document.getElementById('root').innerHTML = `<div class="flex items-center justify-center min-h-screen bg-red-50 p-8"><div class="p-10 text-center text-xl text-red-700 bg-red-100 rounded-xl shadow-lg">❌ Error al conectar con Firebase: ${error.message}</div></div>`;
+                return false;
+            }
+        };
+    </script>
+
+    <div id="root">
+        <div class="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+            <div class="loader"></div>
+            <p class="mt-4 text-gray-600 font-medium">Cargando Planificador Financiero Pro...</p>
+        </div>
+    </div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useCallback, useMemo, createContext, useContext, useRef } = React;
+
+        // ==================================
+        // CONTEXTO Y ESTADO GLOBAL
+        // ==================================
+        const AppContext = createContext();
+        const useAppContext = () => useContext(AppContext);
+
+        const AppProvider = ({ children }) => {
+            const [userId, setUserId] = useState(null);
+            const [data, setData] = useState({ 
+                transactions: [], 
+                goals: [], 
+                loans: [],
+                logs: [],
+                settings: { currency: 'GTQ' }
+            });
+            const [isLoading, setIsLoading] = useState(true);
+            const [error, setError] = useState(null);
+
+            useEffect(() => {
+                const init = async () => {
+                    const success = await window.initializeFirebase();
+                    if (success) {
+                        const unsubscribe = window.onAuthStateChanged(window.auth, (user) => {
+                            if (user) setUserId(user.uid);
+                            else {
+                                setError("No se pudo autenticar al usuario.");
+                                setIsLoading(false);
+                            }
+                        });
+                        return () => unsubscribe();
+                    }
+                };
+                init();
+            }, []);
+
+            useEffect(() => {
+                if (!userId) return;
+                setIsLoading(true);
+                const docRef = window.doc(window.db, `artifacts/${window.appId}/users/${userId}/financial_planner_data`, 'user_data');
+                const unsubscribe = window.onSnapshot(docRef, (docSnap) => {
+                    if (docSnap.exists()) {
+                        const d = docSnap.data();
+                        setData({
+                            transactions: d.transactions ? JSON.parse(d.transactions) : [],
+                            goals: d.goals ? JSON.parse(d.goals) : [],
+                            loans: d.loans ? JSON.parse(d.loans) : [],
+                            logs: d.logs ? JSON.parse(d.logs) : [],
+                            settings: d.settings || { currency: 'GTQ' }
+                        });
+                    }
+                    setIsLoading(false);
+                }, (err) => {
+                    console.error("Error en Firestore:", err);
+                    setError("No se pudieron cargar los datos.");
+                    setIsLoading(false);
+                });
+                return () => unsubscribe();
+            }, [userId]);
+
+            const saveData = useCallback(async (updatedData) => {
+                if (!userId) return;
+                
+                const currentData = data;
+                const dataToSave = {
+                    transactions: JSON.stringify(updatedData.transactions ?? currentData.transactions),
+                    goals: JSON.stringify(updatedData.goals ?? currentData.goals),
+                    loans: JSON.stringify(updatedData.loans ?? currentData.loans),
+                    logs: JSON.stringify(updatedData.logs ?? currentData.logs),
+                    settings: updatedData.settings ?? currentData.settings,
+                    lastUpdate: new Date().toISOString()
+                };
+                
+                const docRef = window.doc(window.db, `artifacts/${window.appId}/users/${userId}/financial_planner_data`, 'user_data');
+                await window.setDoc(docRef, dataToSave, { merge: true });
+            }, [userId, data]);
+            
+            // --- GESTIÓN DE TRANSACCIONES ---
+            const addOrUpdateTransaction = useCallback(async (transaction) => {
+                let newTransactions, logAction, logDetails;
+                
+                if (transaction.id) {
+                    newTransactions = data.transactions.map(t => t.id === transaction.id ? transaction : t);
+                    logAction = 'Transacción actualizada';
+                    logDetails = { name: transaction.name, amount: transaction.amount };
+                } else {
+                    const newTrans = { ...transaction, id: crypto.randomUUID(), date: transaction.date || new Date().toISOString().split('T')[0] };
+                    newTransactions = [...data.transactions, newTrans];
+                    logAction = 'Transacción creada';
+                    logDetails = { name: newTrans.name, amount: newTrans.amount };
+                }
+                
+                const newLog = { id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: logAction, details: logDetails };
+                const newLogs = [newLog, ...data.logs].slice(0, 100);
+
+                const updatedData = { ...data, transactions: newTransactions, logs: newLogs };
+                setData(updatedData);
+                await saveData(updatedData);
+            }, [data, saveData]);
+
+            const deleteTransaction = useCallback(async (id) => {
+                const transToDelete = data.transactions.find(t => t.id === id);
+                if (!transToDelete) return;
+                
+                const newTransactions = data.transactions.filter(t => t.id !== id);
+                const newLog = { id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'Transacción eliminada', details: { name: transToDelete.name } };
+                const newLogs = [newLog, ...data.logs].slice(0, 100);
+
+                const updatedData = { ...data, transactions: newTransactions, logs: newLogs };
+                setData(updatedData);
+                await saveData(updatedData);
+            }, [data, saveData]);
+
+            // --- GESTIÓN DE PRÉSTAMOS ---
+            const addOrUpdateLoan = useCallback(async (loan) => {
+                let newLoans, logAction, logDetails;
+
+                if (loan.id) {
+                    newLoans = data.loans.map(l => l.id === loan.id ? loan : l);
+                    logAction = 'Préstamo actualizado';
+                    logDetails = { name: loan.name };
+                } else {
+                    const newLoan = { ...loan, id: crypto.randomUUID(), paidAmount: loan.paidAmount || 0 };
+                    newLoans = [...data.loans, newLoan];
+                    logAction = 'Préstamo añadido';
+                    logDetails = { name: newLoan.name, total: newLoan.totalAmount };
+                }
+                
+                const newLog = { id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: logAction, details: logDetails };
+                const newLogs = [newLog, ...data.logs].slice(0, 100);
+                
+                const updatedData = { ...data, loans: newLoans, logs: newLogs };
+                setData(updatedData);
+                await saveData(updatedData);
+            }, [data, saveData]);
+
+            const deleteLoan = useCallback(async (id) => {
+                const loanToDelete = data.loans.find(l => l.id === id);
+                if (!loanToDelete) return;
+
+                const newLoans = data.loans.filter(l => l.id !== id);
+                const newLog = { id: crypto.randomUUID(), timestamp: new Date().toISOString(), action: 'Préstamo eliminado', details: { name: loanToDelete.name } };
+                const newLogs = [newLog, ...data.logs].slice(0, 100);
+                
+                const updatedData = { ...data, loans: newLoans, logs: newLogs };
+                setData(updatedData);
+                await saveData(updatedData);
+            }, [data, saveData]);
+
+            const contextValue = {
+                data, isLoading, error, userId,
+                currency: data.settings.currency,
+                addOrUpdateTransaction, deleteTransaction,
+                addOrUpdateLoan, deleteLoan
+            };
+            
+            if (error) return <div className="text-center p-8 text-red-600">{error}</div>;
+
+            return (
+                <AppContext.Provider value={contextValue}>
+                    {children}
+                </AppContext.Provider>
+            );
+        };
+        
+        // ==================================
+        // COMPONENTES REUTILIZABLES
+        // ==================================
+        const Icon = ({ name, className = 'w-5 h-5' }) => {
+            // FIX: Safely access the global 'lucide' object, which might not be ready on initial render.
+            const icons = typeof lucide !== 'undefined' ? lucide : {};
+            const TargetIcon = icons[name];
+            
+            if (!TargetIcon) {
+                // Fallback to a default icon to prevent crashing.
+                const FallbackIcon = icons['AlertCircle'];
+                return FallbackIcon ? <FallbackIcon className={`${className} text-red-500`} /> : null;
+            }
+
+            return <TargetIcon className={className} strokeWidth={2} />;
+        };
+
+        const formatCurrency = (amount, currency = 'GTQ') => {
+            return new Intl.NumberFormat('es-GT', {
+                style: 'currency',
+                currency: currency,
+            }).format(amount);
+        };
+        
+        const ChartComponent = ({ type, data, options }) => {
+            const chartRef = useRef(null);
+            const chartInstance = useRef(null);
+
+            useEffect(() => {
+                if (chartInstance.current) {
+                    chartInstance.current.destroy();
+                }
+                const ctx = chartRef.current.getContext('2d');
+                chartInstance.current = new Chart(ctx, { type, data, options });
+
+                return () => {
+                    if (chartInstance.current) {
+                        chartInstance.current.destroy();
+                    }
+                };
+            }, [type, data, options]);
+
+            return <canvas ref={chartRef}></canvas>;
+        };
+
+        // ==================================
+        // PÁGINA: DASHBOARD
+        // ==================================
+        const DashboardPage = () => {
+            const { data, currency } = useAppContext();
+            const { transactions } = data;
+
+            const { totalIncome, totalExpenses, balance, expenseData } = useMemo(() => {
+                const monthly = transactions.filter(t => new Date(t.date).getMonth() === new Date().getMonth());
+                const totalIncome = monthly.filter(t => t.type === 'ingreso').reduce((sum, t) => sum + parseFloat(t.amount), 0);
+                const totalExpenses = monthly.filter(t => t.type === 'gasto').reduce((sum, t) => sum + parseFloat(t.amount), 0);
+                
+                const expenseGroups = monthly.filter(t => t.type === 'gasto').reduce((acc, t) => {
+                    const type = t.expenseType || 'discrecional';
+                    acc[type] = (acc[type] || 0) + parseFloat(t.amount);
+                    return acc;
+                }, {});
+
+                const expenseData = {
+                    labels: Object.keys(expenseGroups).map(k => k.charAt(0).toUpperCase() + k.slice(1)),
+                    datasets: [{
+                        data: Object.values(expenseGroups),
+                        backgroundColor: ['#3b82f6', '#ef4444', '#f97316'],
+                    }]
+                };
+
+                return { totalIncome, totalExpenses, balance: totalIncome - totalExpenses, expenseData };
+            }, [transactions]);
+
+            return (
+                <div className="p-4 sm:p-6 space-y-6">
+                    <h2 className="text-3xl font-bold text-gray-800">Dashboard Mensual</h2>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="p-4 bg-white rounded-lg shadow-md">
+                            <h3 className="text-gray-500">Ingresos</h3>
+                            <p className="text-2xl font-bold text-green-600">{formatCurrency(totalIncome, currency)}</p>
+                        </div>
+                        <div className="p-4 bg-white rounded-lg shadow-md">
+                            <h3 className="text-gray-500">Gastos</h3>
+                            <p className="text-2xl font-bold text-red-600">{formatCurrency(totalExpenses, currency)}</p>
+                        </div>
+                         <div className="p-4 bg-white rounded-lg shadow-md">
+                            <h3 className="text-gray-500">Balance</h3>
+                            <p className={`text-2xl font-bold ${balance >= 0 ? 'text-blue-600' : 'text-orange-500'}`}>{formatCurrency(balance, currency)}</p>
+                        </div>
+                    </div>
+                    <div className="p-6 bg-white rounded-lg shadow-md">
+                         <h3 className="text-lg font-semibold mb-4 text-gray-700">Desglose de Gastos</h3>
+                         <div className="max-w-sm mx-auto">
+                            <ChartComponent type="doughnut" data={expenseData} options={{ responsive: true, maintainAspectRatio: true }} />
+                         </div>
+                    </div>
+                </div>
+            );
+        };
+        
+        // ==================================
+        // PÁGINA: ASESOR IA
+        // ==================================
+        const AIAssistantPage = () => {
+            const { data } = useAppContext();
+            const [advice, setAdvice] = useState('');
+            const [isLoading, setIsLoading] = useState(false);
+            const [error, setError] = useState('');
+
+            const getAdvice = async () => {
+                setIsLoading(true);
+                setError('');
+                setAdvice('');
+
+                const summary = {
+                    transactions: data.transactions.slice(-20), // últimos 20
+                    loans: data.loans,
+                    goals: data.goals,
+                };
+                
+                const systemPrompt = "Actúa como un asesor financiero personal para un usuario en Guatemala. Tu tono debe ser alentador, práctico y fácil de entender. Analiza los datos financieros proporcionados y ofrece 3 consejos concretos y accionables. No uses jerga financiera complicada. Formatea tu respuesta en Markdown.";
+                const userQuery = `Este es un resumen de mis finanzas: ${JSON.stringify(summary)}. Basado en esto, ¿cuáles son los 3 consejos más importantes que me puedes dar para mejorar mi salud financiera?`;
+                const apiKey = "";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: userQuery }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] },
+                        })
+                    });
+                    if (!response.ok) throw new Error(`Error de la API: ${response.statusText}`);
+                    
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        setAdvice(text);
+                    } else {
+                        throw new Error("No se recibió una respuesta válida de la IA.");
+                    }
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+            
+            return (
+                <div className="p-4 sm:p-6 space-y-6">
+                    <h2 className="text-3xl font-bold text-gray-800">Asesor Financiero con IA</h2>
+                    <div className="p-6 bg-white rounded-lg shadow-md">
+                        <p className="text-gray-600 mb-4">Obtén consejos personalizados basados en tus datos financieros. La IA analizará tus transacciones, deudas y metas para darte recomendaciones prácticas.</p>
+                        <button onClick={getAdvice} disabled={isLoading} className="w-full px-4 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow hover:bg-blue-700 disabled:bg-blue-300 flex items-center justify-center">
+                            {isLoading ? <div className="loader !w-6 !h-6 !border-t-white"></div> : <><Icon name="Sparkles" className="w-5 h-5 mr-2"/> Generar Consejo Financiero</>}
+                        </button>
+                    </div>
+                    {error && <div className="p-4 bg-red-100 text-red-700 rounded-lg">{error}</div>}
+                    {advice && (
+                        <div className="p-6 bg-white rounded-lg shadow-md ai-advice">
+                            <h3 className="text-xl font-semibold mb-2">Aquí tienes tu consejo:</h3>
+                            <div dangerouslySetInnerHTML={{ __html: advice.replace(/\n/g, '<br />') }} />
+                             <p className="mt-4 text-xs text-gray-500 italic">Descargo de responsabilidad: Este consejo es generado por una IA y no debe considerarse como asesoramiento financiero profesional.</p>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+        
+        // ==================================
+        // PÁGINA DE PRÉSTAMOS
+        // ==================================
+         const LoanForm = ({ loanToEdit, onSave, onCancel }) => {
+            const { deleteLoan } = useAppContext();
+            const initialState = { id: null, name: '', totalAmount: '', paidAmount: '0', type: 'prestamo' };
+            const [formData, setFormData] = useState(loanToEdit || initialState);
+
+            const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+            const handleSubmit = async (e) => { e.preventDefault(); await onSave(formData); onCancel(); };
+            const handleDelete = async () => { if (formData.id) { await deleteLoan(formData.id); onCancel(); } };
+
+            return (
+                <div className="bg-white p-6 rounded-lg shadow-lg max-w-md mx-auto">
+                    <h3 className="text-xl font-bold mb-4">{formData.id ? 'Editar' : 'Nuevo'} Préstamo/Crédito</h3>
+                    <form onSubmit={handleSubmit} className="space-y-4">
+                        <input name="name" value={formData.name} onChange={handleChange} placeholder="Descripción (Ej: Préstamo de auto)" required className="w-full p-2 border rounded" />
+                        <input name="totalAmount" type="number" value={formData.totalAmount} onChange={handleChange} placeholder="Monto Total" required className="w-full p-2 border rounded" step="0.01" />
+                        <input name="paidAmount" type="number" value={formData.paidAmount} onChange={handleChange} placeholder="Monto Pagado" required className="w-full p-2 border rounded" step="0.01" />
+                        <select name="type" value={formData.type} onChange={handleChange} className="w-full p-2 border rounded bg-white">
+                            <option value="prestamo">Préstamo</option>
+                            <option value="credito">Tarjeta de Crédito</option>
+                        </select>
+                        <div className="flex justify-end space-x-2">
+                            {formData.id && <button type="button" onClick={handleDelete} className="px-4 py-2 bg-red-500 text-white rounded">Eliminar</button>}
+                            <button type="button" onClick={onCancel} className="px-4 py-2 bg-gray-300 rounded">Cancelar</button>
+                            <button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">Guardar</button>
+                        </div>
+                    </form>
+                </div>
+            );
+        };
+        
+        const LoanItem = ({ loan, onEdit, currency }) => {
+             const balance = parseFloat(loan.totalAmount) - parseFloat(loan.paidAmount);
+             const progress = (parseFloat(loan.paidAmount) / parseFloat(loan.totalAmount)) * 100;
+             return (
+                <div onClick={() => onEdit(loan)} className="p-4 bg-white rounded-lg shadow-sm hover:shadow-md cursor-pointer space-y-2">
+                    <div className="flex justify-between items-center">
+                        <p className="font-semibold">{loan.name}</p>
+                        <span className={`text-xs px-2 py-1 rounded-full ${loan.type === 'prestamo' ? 'bg-purple-100 text-purple-700' : 'bg-pink-100 text-pink-700'}`}>{loan.type}</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                        <div className="bg-blue-600 h-2.5 rounded-full" style={{width: `${progress}%`}}></div>
+                    </div>
+                    <div className="text-sm flex justify-between">
+                        <span className="text-gray-600">Pagado: {formatCurrency(loan.paidAmount, currency)}</span>
+                        <span className="font-medium text-red-600">Saldo: {formatCurrency(balance, currency)}</span>
+                    </div>
+                </div>
+             );
+        };
+        
+        const LoansPage = () => {
+            const { data, addOrUpdateLoan, isLoading, currency } = useAppContext();
+            const [showModal, setShowModal] = useState(false);
+            const [editingLoan, setEditingLoan] = useState(null);
+
+            const openModal = (loan = null) => { setEditingLoan(loan); setShowModal(true); };
+            const closeModal = () => { setEditingLoan(null); setShowModal(false); };
+            
+            return (
+                <div className="p-4 space-y-4">
+                    <div className="flex justify-between items-center">
+                         <h2 className="text-2xl font-bold">Préstamos y Créditos</h2>
+                         <button onClick={() => openModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700">Añadir Nuevo</button>
+                    </div>
+                    {isLoading ? <p>Cargando...</p> : (
+                        <div className="space-y-2">
+                            {data.loans.map(l => <LoanItem key={l.id} loan={l} onEdit={openModal} currency={currency} />)}
+                        </div>
+                    )}
+                    {showModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+                            <LoanForm loanToEdit={editingLoan} onSave={addOrUpdateLoan} onCancel={closeModal} />
+                        </div>
+                    )}
+                </div>
+            );
+        };
+        
+        // --- PÁGINA DE TRANSACCIONES ---
+        const TransactionsPage = () => {
+            const { data, addOrUpdateTransaction, isLoading, currency } = useAppContext();
+            const [showModal, setShowModal] = useState(false);
+            const [editingTransaction, setEditingTransaction] = useState(null);
+            const openModal = (transaction = null) => { setEditingTransaction(transaction); setShowModal(true); };
+            const closeModal = () => { setEditingTransaction(null); setShowModal(false); };
+            const sortedTransactions = useMemo(() => [...data.transactions].sort((a, b) => new Date(b.date) - new Date(a.date)), [data.transactions]);
+            return (
+                <div className="p-4 space-y-4">
+                    <div className="flex justify-between items-center"><h2 className="text-2xl font-bold">Transacciones</h2><button onClick={() => openModal()} className="px-4 py-2 bg-blue-600 text-white rounded-lg shadow hover:bg-blue-700">Añadir Nueva</button></div>
+                    {isLoading ? <p>Cargando...</p> : (<div className="space-y-2">{sortedTransactions.map(t => <TransactionItem key={t.id} transaction={t} onEdit={openModal} currency={currency} />)}</div>)}
+                    {showModal && (<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center"><TransactionForm transactionToEdit={editingTransaction} onSave={addOrUpdateTransaction} onCancel={closeModal} /></div>)}
+                </div>
+            );
+        };
+        const TransactionForm = ({ transactionToEdit, onSave, onCancel }) => {
+            const { deleteTransaction } = useAppContext();
+            const initialState = { id: null, name: '', amount: '', type: 'gasto', date: new Date().toISOString().split('T')[0], expenseType: 'variable' };
+            const [formData, setFormData] = useState(transactionToEdit || initialState);
+            const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+            const handleSubmit = async (e) => { e.preventDefault(); await onSave(formData); onCancel(); };
+            const handleDelete = async () => { if (formData.id) { await deleteTransaction(formData.id); onCancel(); } };
+            return (<div className="bg-white p-6 rounded-lg shadow-lg max-w-md mx-auto"><h3 className="text-xl font-bold mb-4">{formData.id ? 'Editar' : 'Nueva'} Transacción</h3><form onSubmit={handleSubmit} className="space-y-4"><input name="name" value={formData.name} onChange={handleChange} placeholder="Descripción" required className="w-full p-2 border rounded" /><input name="amount" type="number" value={formData.amount} onChange={handleChange} placeholder="Monto" required className="w-full p-2 border rounded" step="0.01" /><input name="date" type="date" value={formData.date} onChange={handleChange} required className="w-full p-2 border rounded" /><select name="type" value={formData.type} onChange={handleChange} className="w-full p-2 border rounded bg-white"><option value="gasto">Gasto</option><option value="ingreso">Ingreso</option></select>{formData.type === 'gasto' && (<select name="expenseType" value={formData.expenseType} onChange={handleChange} className="w-full p-2 border rounded bg-white"><option value="fijo">Fijo (Casa, Educación)</option><option value="variable">Variable (Comida, Gasolina)</option><option value="discrecional">Discrecional (Ocio)</option></select>)}<div className="flex justify-end space-x-2">{formData.id && <button type="button" onClick={handleDelete} className="px-4 py-2 bg-red-500 text-white rounded">Eliminar</button>}<button type="button" onClick={onCancel} className="px-4 py-2 bg-gray-300 rounded">Cancelar</button><button type="submit" className="px-4 py-2 bg-blue-500 text-white rounded">Guardar</button></div></form></div>);
+        };
+        const TransactionItem = ({ transaction, onEdit, currency }) => {
+             const amountClass = transaction.type === 'ingreso' ? 'text-green-600' : 'text-red-600';
+             return (<div onClick={() => onEdit(transaction)} className="flex justify-between items-center p-3 bg-white rounded-lg shadow-sm hover:shadow-md cursor-pointer"><div><p className="font-semibold">{transaction.name}</p><p className="text-sm text-gray-500">{transaction.date}</p></div><p className={`font-bold ${amountClass}`}>{formatCurrency(parseFloat(transaction.amount || 0), currency)}</p></div>);
+        };
+
+
+        // ==================================
+        // COMPONENTE PRINCIPAL DE LA APP
+        // ==================================
+        const App = () => {
+            const { userId } = useContext(AppContext);
+            const [activePage, setActivePage] = useState('dashboard');
+
+            if (!userId) {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+                        <div className="loader"></div>
+                        <p className="mt-4 text-gray-600 font-medium">Estableciendo conexión segura...</p>
+                    </div>
+                );
+            }
+            
+            const NavItem = ({ page, icon, label }) => (
+                <button onClick={() => setActivePage(page)} className={`flex flex-col items-center space-y-1 p-2 rounded-lg w-full ${activePage === page ? 'text-blue-600' : 'text-gray-500 hover:bg-gray-100'}`}>
+                    <Icon name={icon} className="w-6 h-6" />
+                    <span className="text-xs font-medium">{label}</span>
+                </button>
+            );
+
+            const renderPage = () => {
+                switch(activePage) {
+                    case 'dashboard': return <DashboardPage />;
+                    case 'transactions': return <TransactionsPage />;
+                    case 'loans': return <LoansPage />;
+                    case 'ai': return <AIAssistantPage />;
+                    default: return <DashboardPage />;
+                }
+            };
+
+            return (
+                <div className="flex flex-col min-h-screen">
+                    <main className="flex-grow pb-20 max-w-4xl mx-auto w-full">
+                        {renderPage()}
+                    </main>
+                    <footer className="fixed bottom-0 left-0 right-0 bg-white shadow-t border-t">
+                        <nav className="max-w-4xl mx-auto flex justify-around p-1">
+                            <NavItem page="dashboard" icon="LayoutDashboard" label="Dashboard" />
+                            <NavItem page="transactions" icon="List" label="Transacciones" />
+                            <NavItem page="loans" icon="Landmark" label="Préstamos" />
+                            <NavItem page="ai" icon="Sparkles" label="Asesor IA" />
+                        </nav>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(
+            <AppProvider>
+                <App />
+            </AppProvider>
+        );
+    </script>
+</body>
+</html>
+
+
