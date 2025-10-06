@@ -1,0 +1,769 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Foco Diario y Estrategia de Cierre (AI Sales Coach)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #eef2ff; /* Indigo Light Background */
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .gradient-focus {
+            background: linear-gradient(135deg, #4f46e5 0%, #a5b4fc 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Contenedor Principal -->
+<div id="app" class="p-4 md:p-8 space-y-8 max-w-7xl mx-auto">
+    
+    <header class="text-center space-y-2">
+        <h1 class="text-3xl font-extrabold text-gray-900">🚀 Foco Diario y Estrategia IA</h1>
+        <!-- FEEDBACK DE CONEXIÓN CRÍTICO -->
+        <p id="user-info" class="text-sm font-semibold text-indigo-700">🔴 Desconectado. Inicializando...</p>
+        <div id="loading-spinner" class="text-center p-4">
+            <svg class="animate-spin h-6 w-6 text-indigo-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+    </header>
+
+    <!-- Foco Diario + Metas MAR -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Foco Diario Prioritario (El cliente más importante para hoy) -->
+        <div class="card p-6 lg:col-span-2 space-y-4 gradient-focus">
+            <h2 class="text-xl font-bold flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 text-yellow-300"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                🎯 Cliente Prioritario del Día
+            </h2>
+            <div id="daily-focus-card" class="bg-white p-4 rounded-lg shadow-inner text-gray-800 space-y-3">
+                <p id="focus-client-name" class="text-2xl font-bold text-indigo-700">Cargando la prioridad...</p>
+                <p id="focus-strategy" class="text-lg text-gray-700">Estrategia: <span class="font-semibold italic">N/A</span></p>
+                <p id="focus-details" class="text-sm text-gray-500"></p>
+                
+                <div class="flex flex-col md:flex-row gap-3 pt-3">
+                    <button id="btn-get-ai-strategy" onclick="requestAiSuggestion()" disabled class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md disabled:bg-gray-400">
+                        ✨ Sugerencia de Estrategia IA
+                    </button>
+                    <button id="btn-log-action" onclick="openActionModal(dailyFocusClient.id)" disabled class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md disabled:bg-gray-400">
+                        ✅ Registrar Acción
+                    </button>
+                </div>
+
+                <div id="ai-suggestion-box" class="mt-4 p-3 bg-yellow-50 text-yellow-800 border-l-4 border-yellow-500 rounded hidden">
+                    <p class="font-bold">Coach IA:</p>
+                    <p id="ai-suggestion-text" class="text-sm italic"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metas MAR (Metas, Acciones, Resultados) -->
+        <div class="card p-5 lg:col-span-1 space-y-4">
+            <h2 class="text-xl font-bold text-green-700 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 text-green-500"><path d="M22 10.5 5.2 21.37a1 1 0 0 1-1.6-.87V3.53a1 1 0 0 1 1.6-.87L22 10.5Z"/></svg>
+                Metas y Resultados (MAR)
+            </h2>
+            <div id="mar-goals-list" class="space-y-3 max-h-64 overflow-y-auto">
+                <p class="text-gray-500 text-sm">Cargando objetivos...</p>
+            </div>
+            <button onclick="openMarModal()" class="w-full mt-2 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow-md">
+                + Nueva Meta MAR
+            </button>
+        </div>
+    </div>
+
+    <!-- Tabla de Clientes Completa -->
+    <div class="card p-5 space-y-5">
+        <h2 class="text-xl font-bold text-indigo-700 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 text-blue-500"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/></svg>
+            Pipeline Completo
+        </h2>
+        
+        <!-- Filtros -->
+        <div class="flex flex-col md:flex-row space-y-3 md:space-y-0 md:space-x-4">
+            <div>
+                <label for="filter-industry" class="block text-sm font-medium text-gray-700">Filtrar por Industria</label>
+                <select id="filter-industry" onchange="renderClientTable()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm border"></select>
+            </div>
+            <div>
+                <label for="filter-classification" class="block text-sm font-medium text-gray-700">Filtrar por Clasificación</label>
+                <select id="filter-classification" onchange="renderClientTable()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm border">
+                    <option value="ALL">Todas</option>
+                    <option value="a">A (Alta)</option>
+                    <option value="b">B (Media)</option>
+                    <option value="c">C (Baja)</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Tabla -->
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresa</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prob. Negocio</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estrategia/Próximo Contacto</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cita</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="client-table-body" class="bg-white divide-y divide-gray-200">
+                    <tr><td colspan="5" class="py-4 text-center text-gray-500">Cargando datos...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Registrar Acción y Siguiente Paso -->
+<div id="action-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:max-w-xl card">
+        <div class="mt-3 text-center">
+            <h3 class="text-lg leading-6 font-bold text-gray-900">Registrar Acción y Actualizar Estrategia</h3>
+            <p id="action-client-name" class="text-sm text-indigo-600 mt-1"></p>
+            <form id="action-form" class="mt-4 space-y-4 text-left">
+                <input type="hidden" id="action-client-id">
+                
+                <div>
+                    <label for="action-cita-conseguida" class="block text-sm font-medium text-gray-700">¿Cita/Portafolio Realizada?</label>
+                    <select id="action-cita-conseguida" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                        <option value="NO">NO</option>
+                        <option value="SI">SI</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label for="action-strategy" class="block text-sm font-medium text-gray-700">Nueva Estrategia / Próximo Paso</label>
+                    <textarea id="action-strategy" rows="3" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border" placeholder="Ej: Llamar el lunes para confirmar presupuesto."></textarea>
+                </div>
+                
+                <div>
+                    <label for="action-next-contact-date" class="block text-sm font-medium text-gray-700">Programar Próximo Contacto</label>
+                    <input type="date" id="action-next-contact-date" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                </div>
+                
+                <div class="flex justify-end space-x-4 pt-4">
+                    <button type="button" onclick="closeActionModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Guardar Avance
+                    </button>
+                </div>
+                <!-- Mensaje de error de guardado -->
+                <p id="action-save-error" class="text-red-600 text-sm mt-2 hidden"></p>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Metas MAR (Nuevo/Editar) -->
+<div id="mar-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:max-w-xl card">
+        <div class="mt-3 text-center">
+            <h3 class="text-lg leading-6 font-medium text-gray-900" id="mar-modal-title">Nueva Meta MAR</h3>
+            <form id="mar-form" class="mt-4 space-y-4 text-left">
+                <input type="hidden" id="mar-id">
+                
+                <div>
+                    <label for="mar-meta" class="block text-sm font-medium text-gray-700">Meta/Objetivo</label>
+                    <textarea id="mar-meta" required rows="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border"></textarea>
+                </div>
+                <div>
+                    <label for="mar-accion" class="block text-sm font-medium text-gray-700">Acción/Estrategia Principal</label>
+                    <textarea id="mar-accion" required rows="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border"></textarea>
+                </div>
+                <div>
+                    <label for="mar-resultado" class="block text-sm font-medium text-gray-700">Resultado / Estado Actual</label>
+                    <select id="mar-resultado" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                        <option value="En Curso">En Curso</option>
+                        <option value="Completada">Completada</option>
+                        <option value="Detenida">Detenida</option>
+                    </select>
+                </div>
+                
+                <div class="flex justify-end space-x-4 pt-4">
+                    <button type="button" onclick="closeMarModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Guardar Meta
+                    </button>
+                </div>
+                <!-- Mensaje de error de guardado -->
+                <p id="mar-save-error" class="text-red-600 text-sm mt-2 hidden"></p>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<script type="module">
+    // --- IMPORTACIONES DE FIREBASE ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot, collection, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    setLogLevel('Debug');
+
+    let db;
+    let auth;
+    let clients = [];
+    let marGoals = [];
+    let userId = null;
+    let isAuthReady = false;
+    let dailyFocusClient = null; 
+
+    // --- Configuración e Inicialización de Firebase (MANDATORIO) ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    // Rutas de colección para guardar los datos.
+    const CLIENTS_COLLECTION = `artifacts/${appId}/public/data/sales_clients`;
+    const MAR_COLLECTION = `artifacts/${appId}/public/data/sales_goals`;
+    
+    // Configuración para el Coach IA (Gemini API)
+    const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=`;
+    const apiKey = ""; 
+
+    // Datos iniciales de ejemplo (solo se cargan si la base de datos está vacía).
+    const initialClientData = [
+        { "Company (Account) name": "Hospital San Juan De Dios", "Industry": "Banca y finanzas", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Llamada de seguimiento, Oportunidad 1: Presentación de propuesta", "Fecha Próximo Contacto": formatDate(addDays(new Date(), -1)) }, 
+        { "Company (Account) name": "Banco Agromercantil - BAM", "Industry": "Banca y finanzas", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Primer acercamiento: Cold call a Gerencia IT", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 0)) }, 
+        { "Company (Account) name": "INDE", "Industry": "Educación", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Reunión técnica: Alinear solución con requisitos", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "Ministerio de la Defensa", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Identificar contacto clave con poder de decisión", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 0)) }, 
+        { "Company (Account) name": "Ministerio de Salud", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Llamada de prospección: Presentar valor de la solución", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 2)) },
+        { "Company (Account) name": "ICASA - Cerveceria", "Industry": "Industria", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Email de presentación de valor: Referenciar casos de éxito", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 3)) },
+        { "Company (Account) name": "Grupo CMI", "Industry": "Industria", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Buscar referencias internas en LinkedIn", "Fecha Próximo Contacto": formatDate(addDays(new Date(), -2)) }, 
+        { "Company (Account) name": "ministerio de comunicaciones", "Industry": "Servicios", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Investigar presupuesto disponible para el Q4", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 5)) },
+        { "Company (Account) name": "Ministerio de Economia", "Industry": "Banca y finanzas", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Envío de propuesta económica formal", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "Registro de la Propiedad", "Industry": "Educación", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Definir caso de estudio relevante", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 6)) },
+        { "Company (Account) name": "Superintendencia de Bancos", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Reunión informativa con un decisor secundario", "Fecha Próximo Contacto": formatDate(addDays(new Date(), -1)) }, 
+        { "Company (Account) name": "Mides", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Validar cronograma de ejecución y entrega", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 7)) },
+        { "Company (Account) name": "PDH", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Cierre de negocio: Proponer contrato final", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 0)) }, 
+        { "Company (Account) name": "PGN", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Presentación a comité ejecutivo final", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 8)) },
+        { "Company (Account) name": "INE", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 3, "Estrategia": "Solicitar feedback formal sobre la propuesta enviada", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "Gasolineras Uno", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 3, "Estrategia": "Demostración de producto/servicio en sitio", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 9)) },
+        { "Company (Account) name": "Bayer de Centroamerica", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Investigación de necesidades específicas del área de I+D", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 2)) },
+        { "Company (Account) name": "Infasa", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Contacto inicial por LinkedIn con Director de Operaciones", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 10)) },
+        { "Company (Account) name": "Ingenio Pantaleon", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Llamada de prospección a Gerencia de Planta", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 3)) },
+        { "Company (Account) name": "Grupo AG", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Email de seguimiento de contacto inicial con Director General", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "IGSS", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": 0, "Estrategia": "Definir quién es el decisor en el área de Presupuesto", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 11)) },
+        { "Company (Account) name": "Agexport", "Industry": "servicios", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Preparar demo personalizada para equipo de afiliados", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 0)) }, 
+        { "Company (Account) name": "Contraloria", "Industry": "Telco", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Reunión de aclaración de dudas legales", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 12)) },
+        { "Company (Account) name": "OJ", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Propuesta y negociación final del alcance", "Fecha Próximo Contacto": formatDate(addDays(new Date(), -3)) }, 
+        { "Company (Account) name": "INACIF", "Industry": "Gobierno", "Clasificacion de Cuentas": "c", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Seguimiento de cierre y firma de documentos", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 13)) },
+        { "Company (Account) name": "Instituto Nacional de Migracion", "Industry": "Gobierno", "Clasificacion de Cuentas": "c", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 0, "Estrategia": "Llamada para definir fecha de inicio de proyecto", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 14)) },
+    ];
+
+    function addDays(date, days) {
+        const result = new Date(date);
+        result.setDate(result.getDate() + days);
+        return result;
+    }
+
+    function formatDate(date) {
+        return date.toISOString().split('T')[0];
+    }
+
+    // --- FUNCIÓN DE INICIALIZACIÓN DE FIREBASE Y AUTENTICACIÓN ---
+    async function initializeAppAndAuth() {
+        const userInfoElement = document.getElementById('user-info');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            loadingSpinner.classList.remove('hidden');
+            userInfoElement.textContent = '🟡 Intentando autenticar...';
+
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                loadingSpinner.classList.add('hidden');
+                if (user) {
+                    userId = user.uid;
+                    // Muestra el estado de conexión de forma visible
+                    userInfoElement.innerHTML = `✅ **Conectado** | ID de sesión: ${userId.substring(0, 8)}...`;
+                    isAuthReady = true;
+                    checkAndPopulateData();
+                    setupFirestoreListeners();
+                } else {
+                    userInfoElement.innerHTML = '❌ **ERROR de Conexión**. No se guardarán los datos. Revisa la consola.';
+                    console.error("No se pudo autenticar al usuario. Los datos no se guardarán.");
+                }
+            });
+
+        } catch (error) {
+            loadingSpinner.classList.add('hidden');
+            userInfoElement.innerHTML = `❌ **ERROR CRÍTICO**. Detalles: ${error.message}`;
+            console.error("Error al inicializar Firebase o autenticar:", error);
+        }
+    }
+
+    // Función para revisar si hay datos y cargar el ejemplo si es la primera vez
+    async function checkAndPopulateData() {
+        if (!isAuthReady) return;
+        try {
+            const clientsRef = collection(db, CLIENTS_COLLECTION);
+            const snapshot = await getDocs(clientsRef);
+
+            if (snapshot.empty) {
+                console.log("Colección de clientes vacía. Iniciando carga de datos iniciales...");
+                const batch = writeBatch(db);
+
+                initialClientData.forEach((data) => {
+                    const newDocRef = doc(clientsRef); 
+                    const clientData = {
+                        ...data,
+                        id: newDocRef.id,
+                        'Ejecutivo de Ventas': userId, // Usar el userId del usuario actual
+                        'Leads Generados': data['Leads Generados'] || 0,
+                        'Country': 'Guatemala'
+                    };
+                    batch.set(newDocRef, clientData);
+                });
+
+                await batch.commit();
+                console.log("Datos iniciales cargados con éxito.");
+            }
+        } catch (error) {
+            console.error("Error al poblar los datos iniciales:", error);
+        }
+    }
+
+    function calculateProbability(client) {
+        const classification = client['Clasificacion de Cuentas'] ? client['Clasificacion de Cuentas'].toLowerCase() : 'c';
+        const cita = client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?'] === 'SI';
+
+        if (cita) {
+            if (classification === 'a') return 80;
+            if (classification === 'b') return 60;
+            if (classification === 'c') return 40;
+        } else {
+            if (classification === 'a') return 30;
+            if (classification === 'b') return 15;
+            if (classification === 'c') return 5;
+        }
+        return 0;
+    }
+
+    // --- FUNCIÓN CRÍTICA PARA GRABAR Y LEER DATOS EN TIEMPO REAL (ON SNAPSHOT) ---
+    function setupFirestoreListeners() {
+        if (!isAuthReady) return;
+
+        // Deshabilita los botones de acción hasta que los datos se carguen
+        document.getElementById('btn-get-ai-strategy').disabled = true;
+        document.getElementById('btn-log-action').disabled = true;
+
+        // Listener para Clientes
+        const clientsQuery = query(collection(db, CLIENTS_COLLECTION));
+        onSnapshot(clientsQuery, (snapshot) => {
+            clients = snapshot.docs.map(doc => ({ 
+                id: doc.id, 
+                ...doc.data(), 
+                probability: calculateProbability(doc.data())
+            }));
+
+            clients.sort((a, b) => {
+                if (b.probability !== a.probability) return b.probability - a.probability;
+                
+                const dateA = new Date(a['Fecha Próximo Contacto'] || '3000-01-01');
+                const dateB = new Date(b['Fecha Próximo Contacto'] || '3000-01-01');
+                return dateA - dateB;
+            });
+
+            renderClientTable();
+            renderDailyFocus();
+            // Habilita los botones una vez que los datos están cargados
+            document.getElementById('btn-get-ai-strategy').disabled = false;
+            document.getElementById('btn-log-action').disabled = false;
+        }, (error) => {
+            console.error("Error al escuchar clientes:", error);
+        });
+
+        // Listener para Metas MAR
+        const marQuery = query(collection(db, MAR_COLLECTION));
+        onSnapshot(marQuery, (snapshot) => {
+            marGoals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            renderMarGoals();
+        }, (error) => {
+            console.error("Error al escuchar Metas MAR:", error);
+        });
+    }
+
+    // --- Funciones de Renderizado (Sin cambios en la lógica de almacenamiento) ---
+
+    function renderIndustryFilter() {
+        const industrySelect = document.getElementById('filter-industry');
+        const uniqueIndustries = new Set(clients.map(c => c.Industry).filter(i => i));
+        
+        const currentSelection = industrySelect.value;
+        industrySelect.innerHTML = '<option value="ALL">Todas</option>';
+        uniqueIndustries.forEach(industry => {
+            const option = document.createElement('option');
+            option.value = industry;
+            option.textContent = industry;
+            industrySelect.appendChild(option);
+        });
+
+        if (currentSelection) {
+            industrySelect.value = currentSelection;
+        }
+    }
+
+    function renderDailyFocus() {
+        dailyFocusClient = clients.length > 0 ? clients[0] : null;
+
+        const focusName = document.getElementById('focus-client-name');
+        const focusStrategy = document.getElementById('focus-strategy').querySelector('span');
+        const focusDetails = document.getElementById('focus-details');
+        const btnAi = document.getElementById('btn-get-ai-strategy');
+        const btnLog = document.getElementById('btn-log-action');
+        const aiBox = document.getElementById('ai-suggestion-box');
+        
+        aiBox.classList.add('hidden'); 
+
+        if (!dailyFocusClient) {
+            focusName.textContent = '¡Felicidades! No hay clientes urgentes.';
+            focusStrategy.textContent = 'Dedica tu tiempo a prospectar o a tus Metas MAR.';
+            focusDetails.textContent = '';
+            btnAi.disabled = true;
+            btnLog.disabled = true;
+            return;
+        }
+
+        const client = dailyFocusClient;
+        
+        // Solo habilitar si la autenticación está lista
+        if (isAuthReady) {
+            btnAi.disabled = false;
+            btnLog.disabled = false;
+        } else {
+             btnAi.disabled = true;
+             btnLog.disabled = true;
+        }
+
+
+        const contactDate = client['Fecha Próximo Contacto'];
+        const isPastDue = new Date(contactDate) < new Date(formatDate(new Date()));
+        const dateText = isPastDue ? 
+            `<span class="font-bold text-red-500">¡Vencido desde ${contactDate}!</span>` : 
+            `<span class="font-bold text-indigo-500">Próximo: ${contactDate}</span>`;
+
+        focusName.textContent = client['Company (Account) name'];
+        focusStrategy.textContent = client.Estrategia || 'Estrategia no definida. Pide una sugerencia IA.';
+        focusDetails.innerHTML = `
+            Industria: <span class="font-medium">${client.Industry}</span> | 
+            Clasificación: <span class="font-medium">${client['Clasificacion de Cuentas'].toUpperCase()} (${client.probability}%)</span> |
+            ${dateText}
+        `;
+    }
+
+    // --- Funciones de Interacción con la IA ---
+
+    async function requestAiSuggestion() {
+        if (!dailyFocusClient || !isAuthReady) return;
+
+        const client = dailyFocusClient;
+        const btn = document.getElementById('btn-get-ai-strategy');
+        const aiBox = document.getElementById('ai-suggestion-box');
+        const aiText = document.getElementById('ai-suggestion-text');
+
+        btn.disabled = true;
+        btn.textContent = 'Cargando estrategia...';
+        aiBox.classList.remove('hidden');
+        aiBox.classList.add('bg-gray-100', 'border-gray-400', 'animate-pulse');
+        aiText.textContent = 'Consultando al Coach de Ventas con Google Search...';
+
+        const userQuery = `Basado en la cuenta '${client['Company (Account) name']}' (Industria: ${client.Industry}, Clasificación: ${client['Clasificacion de Cuentas'].toUpperCase()}, Cita conseguida: ${client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?']}). Su estrategia actual es: '${client.Estrategia}'. Sugiere el mejor PRÓXIMO PASO o una estrategia de cierre en 2-3 frases, incluyendo la intención de la acción (Ej: 'Crear urgencia', 'Manejar objeción de precio'). Utiliza información actual sobre estrategias de venta B2B.`;
+        
+        const systemPrompt = `Actúa como un Coach de Ventas B2B de clase mundial, especializado en el mercado de ${client.Industry}. Tu respuesta debe ser concisa, en español y enfocarse solo en la sugerencia estratégica.`;
+
+        try {
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            let response;
+            for (let i = 0; i < 3; i++) { 
+                response = await fetch(GEMINI_API_URL + apiKey, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) break;
+
+                const delay = Math.pow(2, i) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+            
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const result = await response.json();
+            const generatedText = result.candidates?.[0]?.content?.parts?.[0]?.text || 'No se pudo generar una sugerencia en este momento.';
+
+            aiText.innerHTML = generatedText.replace(/\n/g, '<br>');
+            aiBox.classList.remove('bg-gray-100', 'border-gray-400', 'animate-pulse');
+            aiBox.classList.add('bg-yellow-50', 'border-yellow-500');
+
+        } catch (error) {
+            console.error("Error al obtener sugerencia IA:", error);
+            aiText.textContent = 'Error al contactar al Coach IA. Inténtalo de nuevo. ' + error.message;
+            aiBox.classList.remove('bg-gray-100', 'border-gray-400', 'animate-pulse');
+            aiBox.classList.add('bg-red-50', 'border-red-500', 'text-red-800');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '✨ Sugerencia de Estrategia IA';
+        }
+    }
+    
+    // --- Funciones de Guardado (Clientes) ---
+
+    window.openActionModal = function(id) {
+        if (!id || !isAuthReady) return;
+        const client = clients.find(c => c.id === id);
+        if (!client) return;
+
+        document.getElementById('action-save-error').classList.add('hidden'); // Limpiar error
+        document.getElementById('action-client-id').value = id;
+        document.getElementById('action-client-name').textContent = client['Company (Account) name'];
+        
+        document.getElementById('action-cita-conseguida').value = client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?'];
+        document.getElementById('action-strategy').value = client.Estrategia || '';
+        document.getElementById('action-next-contact-date').value = client['Fecha Próximo Contacto'] || formatDate(addDays(new Date(), 1)); 
+        
+        document.getElementById('action-modal').classList.remove('hidden');
+    }
+
+    window.closeActionModal = function() {
+        document.getElementById('action-modal').classList.add('hidden');
+    }
+
+    // Guarda los cambios del cliente en Firestore
+    document.getElementById('action-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!isAuthReady) {
+            document.getElementById('action-save-error').textContent = "Error: No está conectado a la base de datos.";
+            document.getElementById('action-save-error').classList.remove('hidden');
+            return;
+        }
+
+        const id = document.getElementById('action-client-id').value;
+        if (!id) return;
+
+        const newStrategy = document.getElementById('action-strategy').value.trim();
+        const nextContactDate = document.getElementById('action-next-contact-date').value;
+        const citaStatus = document.getElementById('action-cita-conseguida').value;
+        
+        const updateData = {
+            'Estrategia': newStrategy,
+            'Fecha Próximo Contacto': nextContactDate,
+            'CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?': citaStatus,
+            'Last Contact Date': formatDate(new Date()) 
+        };
+
+        try {
+            const clientRef = doc(db, CLIENTS_COLLECTION, id);
+            await setDoc(clientRef, updateData, { merge: true });
+            console.log("Acción y estrategia actualizadas para cliente:", id);
+            closeActionModal();
+        } catch (error) {
+            console.error("Error al actualizar la acción:", error);
+            document.getElementById('action-save-error').textContent = `Fallo al guardar: ${error.message}.`;
+            document.getElementById('action-save-error').classList.remove('hidden');
+        }
+    });
+
+    // --- Funciones de Guardado (MAR Goals) ---
+
+    window.openMarModal = function(id = null) {
+        if (!isAuthReady) {
+            alert("No puede crear metas sin conexión a la base de datos.");
+            return;
+        }
+        const modal = document.getElementById('mar-modal');
+        const title = document.getElementById('mar-modal-title');
+        const form = document.getElementById('mar-form');
+        form.reset();
+        document.getElementById('mar-save-error').classList.add('hidden'); // Limpiar error
+
+        document.getElementById('mar-id').value = id || '';
+        if (id) {
+            const goal = marGoals.find(g => g.id === id);
+            title.textContent = 'Editar Meta MAR';
+            if (goal) {
+                document.getElementById('mar-meta').value = goal.Meta || '';
+                document.getElementById('mar-accion').value = goal.Accion || '';
+                document.getElementById('mar-resultado').value = goal.Resultado || 'En Curso';
+            }
+        } else {
+            title.textContent = 'Nueva Meta MAR';
+            document.getElementById('mar-resultado').value = 'En Curso';
+        }
+        modal.classList.remove('hidden');
+    }
+
+    window.closeMarModal = function() {
+        document.getElementById('mar-modal').classList.add('hidden');
+    }
+
+    // Guarda los cambios de la Meta MAR en Firestore
+    document.getElementById('mar-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+         if (!isAuthReady) {
+            document.getElementById('mar-save-error').textContent = "Error: No está conectado a la base de datos.";
+            document.getElementById('mar-save-error').classList.remove('hidden');
+            return;
+        }
+
+        const id = document.getElementById('mar-id').value;
+        
+        const marData = {
+            'Meta': document.getElementById('mar-meta').value.trim(),
+            'Accion': document.getElementById('mar-accion').value.trim(),
+            'Resultado': document.getElementById('mar-resultado').value,
+            'Ejecutivo de Ventas': userId,
+        };
+
+        try {
+            const marRef = collection(db, MAR_COLLECTION);
+            if (id) {
+                // Actualizar documento existente
+                await setDoc(doc(db, MAR_COLLECTION, id), marData, { merge: true });
+            } else {
+                // Crear nuevo documento
+                await setDoc(doc(marRef), marData);
+            }
+            console.log("Meta MAR guardada.");
+            closeMarModal();
+        } catch (error) {
+            console.error("Error al guardar la Meta MAR:", error);
+             document.getElementById('mar-save-error').textContent = `Fallo al guardar: ${error.message}.`;
+            document.getElementById('mar-save-error').classList.remove('hidden');
+        }
+    });
+
+
+    // --- Renderizado de Componentes (Sin cambios en la lógica de almacenamiento) ---
+
+    function renderClientTable() {
+        const tableBody = document.getElementById('client-table-body');
+        const filterIndustry = document.getElementById('filter-industry').value;
+        const filterClassification = document.getElementById('filter-classification').value;
+
+        if (document.getElementById('filter-industry').options.length <= 1) {
+            renderIndustryFilter();
+        }
+
+        let filteredClients = clients;
+
+        if (filterIndustry !== 'ALL') {
+            filteredClients = filteredClients.filter(c => c.Industry === filterIndustry);
+        }
+        if (filterClassification !== 'ALL') {
+            filteredClients = filteredClients.filter(c => c['Clasificacion de Cuentas'] && c['Clasificacion de Cuentas'].toLowerCase() === filterClassification);
+        }
+
+        tableBody.innerHTML = '';
+
+        if (filteredClients.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-gray-500">No hay clientes que coincidan con los filtros.</td></tr>`;
+            return;
+        }
+
+        filteredClients.forEach(client => {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-indigo-50 transition duration-150';
+
+            const citaStatus = client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?'];
+            const isPastDue = new Date(client['Fecha Próximo Contacto']) < new Date(formatDate(new Date()));
+            const contactDateClass = isPastDue ? 'text-red-500 font-bold' : 'text-gray-600';
+
+            row.innerHTML = `
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-bold text-gray-900">
+                    ${client['Company (Account) name']}
+                    <span class="block text-xs font-medium text-gray-500">${client.Industry} (${client['Clasificacion de Cuentas'].toUpperCase()})</span>
+                </td>
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-bold text-green-700">${client.probability}%</td>
+                <td class="px-3 py-3 text-xs text-gray-600">
+                    <span class="block font-medium text-gray-800">${client.Estrategia || 'N/A'}</span>
+                    <span class="block italic ${contactDateClass}">Prox: ${client['Fecha Próximo Contacto']}</span>
+                </td>
+                <td class="px-3 py-3 whitespace-nowrap">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${citaStatus === 'SI' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${citaStatus}</span>
+                </td>
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-medium">
+                    <button onclick="openActionModal('${client.id}')" class="text-indigo-600 hover:text-indigo-900 font-semibold text-xs">
+                        Actualizar
+                    </button>
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
+    }
+
+    function renderMarGoals() {
+        const listContainer = document.getElementById('mar-goals-list');
+        listContainer.innerHTML = '';
+
+        if (marGoals.length === 0) {
+            listContainer.innerHTML = '<p class="text-gray-500 text-sm italic">Define tus objetivos principales aquí.</p>';
+            return;
+        }
+
+        marGoals.forEach(goal => {
+            const element = document.createElement('div');
+            let color = 'border-gray-400';
+            let bgColor = 'bg-gray-50';
+            if (goal.Resultado === 'Completada') { color = 'border-green-600'; bgColor = 'bg-green-50'; }
+            else if (goal.Resultado === 'En Curso') { color = 'border-indigo-500'; bgColor = 'bg-indigo-50'; }
+            else if (goal.Resultado === 'Detenida') { color = 'border-red-500'; bgColor = 'bg-red-50'; }
+
+            element.className = `p-3 border-l-4 ${color} ${bgColor} rounded-lg shadow-sm border transition duration-300 hover:shadow-md`;
+            element.innerHTML = `
+                <p class="font-bold text-sm text-gray-800">${goal.Meta}</p>
+                <p class="text-xs text-gray-600 mt-1">Estrategia: ${goal.Accion}</p>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="px-2 py-0.5 text-xs font-medium rounded-full ${goal.Resultado === 'Completada' ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-700'}">${goal.Resultado}</span>
+                    <button onclick="openMarModal('${goal.id}')" class="text-xs text-blue-500 hover:text-blue-700 font-medium">
+                        Editar
+                    </button>
+                </div>
+            `;
+            listContainer.appendChild(element);
+        });
+    }
+
+    // Iniciar la aplicación al cargar
+    initializeAppAndAuth();
+
+</script>
+
+</body>
+</html>
