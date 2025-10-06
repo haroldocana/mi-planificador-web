@@ -1,0 +1,955 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+    getAuth, 
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword, 
+    signOut, 
+    signInAnonymously,
+    signInWithCustomToken,
+    onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+    getFirestore, 
+    collection, 
+    query, 
+    onSnapshot, 
+    addDoc, 
+    deleteDoc, 
+    updateDoc, 
+    doc, 
+    serverTimestamp,
+    setDoc, 
+    setLogLevel 
+} from 'firebase/firestore';
+import { 
+    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, 
+    PieChart, Pie, Cell,
+} from 'recharts';
+
+// --- CONFIGURACIÓN E INICIALIZACIÓN DE FIREBASE (Variables Globales del Entorno) ---
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+const apiKey = ""; // API Key para la llamada a Gemini
+
+// Inicializa Firebase fuera del componente
+let app;
+let auth;
+let db;
+
+try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    setLogLevel('debug');
+} catch (error) {
+    console.error("Error al inicializar Firebase:", error);
+}
+
+// Opciones de moneda - AÑADIDO GTQ (Quetzal Guatemalteco)
+const CURRENCIES = {
+    USD: { symbol: '$', name: 'Dólar Estadounidense' },
+    EUR: { symbol: '€', name: 'Euro' },
+    JPY: { symbol: '¥', name: 'Yen Japonés' },
+    GTQ: { symbol: 'Q', name: 'Quetzal Guatemalteco' },
+};
+
+// Ruta de colecciones
+const getTransactionsCollectionRef = (userId) => collection(db, `artifacts/${appId}/users/${userId}/transactions`);
+const getUserConfigDocRef = (userId) => doc(db, `artifacts/${appId}/users/${userId}/config/settings`);
+
+// Colores para los gráficos
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc0cb', '#40e0d0'];
+
+
+// --- COMPONENTE CALCULADORA DE PRÉSTAMOS/DEUDAS ---
+const LoanCalculator = ({ symbol, currencyCode }) => {
+    const [principal, setPrincipal] = useState('');
+    const [interestRate, setInterestRate] = useState('');
+    const [monthlyPayment, setMonthlyPayment] = useState('');
+    const [results, setResults] = useState(null);
+
+    const formatter = new Intl.NumberFormat('es-ES', {
+        style: 'currency',
+        currency: currencyCode,
+        minimumFractionDigits: 2,
+    });
+
+    const calculateLoan = (e) => {
+        e.preventDefault();
+        const P = parseFloat(principal); // Saldo Principal
+        const i = parseFloat(interestRate) / 100 / 12; // Tasa de Interés Mensual
+        const M = parseFloat(monthlyPayment); // Pago Mensual
+
+        if (isNaN(P) || isNaN(i) || isNaN(M) || P <= 0 || i < 0 || M <= 0) {
+            setResults({ error: 'Por favor, ingrese valores positivos válidos para todos los campos.' });
+            return;
+        }
+
+        if (M <= (P * i)) {
+            setResults({ error: 'El pago mensual es insuficiente para cubrir los intereses. La deuda nunca se cancelará.' });
+            return;
+        }
+
+        let remainingBalance = P;
+        let totalInterest = 0;
+        let months = 0;
+        const maxMonths = 1200; // Límite de 100 años para evitar loops infinitos
+
+        while (remainingBalance > 0 && months < maxMonths) {
+            const interestPayment = remainingBalance * i;
+            const principalPayment = M - interestPayment;
+            
+            // Si el último pago es menor al saldo restante
+            if (principalPayment >= remainingBalance) {
+                totalInterest += interestPayment;
+                remainingBalance = 0;
+            } else {
+                remainingBalance -= principalPayment;
+                totalInterest += interestPayment;
+            }
+            months++;
+        }
+
+        if (months >= maxMonths && remainingBalance > 0) {
+             setResults({ error: 'El cálculo excede el límite de 100 años. El pago mensual es demasiado bajo.' });
+        } else {
+            setResults({
+                months: months,
+                years: Math.floor(months / 12),
+                remainingMonths: months % 12,
+                totalInterest: totalInterest,
+                finalBalance: remainingBalance // Debe ser 0 o muy cerca de 0
+            });
+        }
+    };
+
+    const resetCalculator = () => {
+        setPrincipal('');
+        setInterestRate('');
+        setMonthlyPayment('');
+        setResults(null);
+    }
+
+    return (
+        <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-indigo-500">
+            <h2 className="text-xl font-bold text-gray-700 mb-4 border-b pb-2">
+                Calculadora de Préstamos/Deudas
+            </h2>
+            <form onSubmit={calculateLoan} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Saldo de la Deuda ({symbol})</label>
+                    <input type="number" value={principal} onChange={(e) => setPrincipal(e.target.value)} className="w-full border-gray-300 rounded-lg shadow-sm p-2" placeholder="10000" step="0.01" required/>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tasa de Interés Anual (%)</label>
+                    <input type="number" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} className="w-full border-gray-300 rounded-lg shadow-sm p-2" placeholder="12.5" step="0.1" required/>
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Pago Mensual ({symbol})</label>
+                    <input type="number" value={monthlyPayment} onChange={(e) => setMonthlyPayment(e.target.value)} className="w-full border-gray-300 rounded-lg shadow-sm p-2" placeholder="500" step="0.01" required/>
+                </div>
+                
+                <div className="flex space-x-2">
+                    <button type="submit" className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded-xl transition duration-150">
+                        Calcular
+                    </button>
+                    <button type="button" onClick={resetCalculator} className="w-1/4 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 rounded-xl transition duration-150">
+                        Limpiar
+                    </button>
+                </div>
+            </form>
+
+            {results && (
+                <div className="mt-5 p-4 bg-indigo-50 rounded-lg">
+                    {results.error ? (
+                        <p className="text-red-600 font-semibold">{results.error}</p>
+                    ) : (
+                        <div className="space-y-2">
+                            <h3 className="text-lg font-bold text-indigo-700">Resultados del Pago</h3>
+                            <p><strong>Tiempo de Cancelación:</strong> {results.years} años y {results.remainingMonths} meses.</p>
+                            <p><strong>Interés Total Pagado:</strong> <span className="text-red-600 font-semibold">{formatter.format(results.totalInterest)}</span></p>
+                            <p className="text-sm text-gray-500">Se asume una tasa de interés fija y pagos realizados a tiempo.</p>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+// --- FIN COMPONENTE CALCULADORA ---
+
+
+// Componente principal de la aplicación
+const App = () => {
+    // --- ESTADOS ---
+    const [user, setUser] = useState(null);
+    const [userId, setUserId] = useState(null);
+    const [authReady, setAuthReady] = useState(false);
+    const [authError, setAuthError] = useState('');
+    const [transactions, setTransactions] = useState([]);
+    const [loadingTransactions, setLoadingTransactions] = useState(false);
+    const [dbError, setDbError] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [currentView, setCurrentView] = useState('login'); 
+    const [description, setDescription] = useState('');
+    const [amount, setAmount] = useState('');
+    const [type, setType] = useState('income');
+    const [transactionLoading, setTransactionLoading] = useState(false);
+    const [formError, setFormError] = useState('');
+    const [isEditing, setIsEditing] = useState(false);
+    const [currentTransaction, setCurrentTransaction] = useState(null);
+    const [currency, setCurrency] = useState('USD'); 
+    const [isConfigLoading, setIsConfigLoading] = useState(false);
+    const [aiQuery, setAiQuery] = useState('');
+    const [aiResponse, setAiResponse] = useState(null);
+    const [aiLoading, setAiLoading] = useState(false);
+    const [aiError, setAiError] = useState('');
+
+    // --- FUNCIONES DE AUTENTICACIÓN (Se mantienen iguales) ---
+    const handleAuthAction = async (isRegister) => {
+        setAuthError('');
+        if (!email || !password) {
+            setAuthError('Por favor, ingresa correo y contraseña.');
+            return;
+        }
+
+        try {
+            if (isRegister) {
+                await createUserWithEmailAndPassword(auth, email, password);
+            } else {
+                await signInWithEmailAndPassword(auth, email, password);
+            }
+        } catch (error) {
+            console.error("Error de autenticación:", error);
+            if (error.code === 'auth/email-already-in-use') {
+                setAuthError('El correo ya está registrado. ¿Intentaste Iniciar Sesión?');
+            } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+                setAuthError('Credenciales inválidas.');
+            } else {
+                setAuthError('Ocurrió un error. Intenta de nuevo.');
+            }
+        }
+    };
+
+    const handleSignOut = async () => {
+        try {
+            await signOut(auth);
+            await signInAnonymously(auth); 
+        } catch (error) {
+            console.error("Error al cerrar sesión:", error);
+            setAuthError('Error al cerrar sesión.');
+        }
+    };
+
+    // --- MANEJO DE CONFIGURACIÓN (MONEDA) ---
+    const updateCurrency = async (newCurrency) => {
+        if (!userId) return;
+        setIsConfigLoading(true);
+        try {
+            await setDoc(getUserConfigDocRef(userId), { currency: newCurrency }, { merge: true });
+            setCurrency(newCurrency);
+        } catch (error) {
+            console.error("Error al guardar moneda:", error);
+            // Reemplazando alert() con console.error y UI feedback si es necesario
+        } finally {
+            setIsConfigLoading(false);
+        }
+    };
+
+    // --- EFECTOS (Inicialización y Listeners) ---
+    // [Efectos 1, 2 y 3 se mantienen iguales: Autenticación, Configuración (Moneda) y Transacciones]
+    useEffect(() => {
+        if (!auth) return;
+
+        const initialAuth = async () => {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Error en la autenticación inicial:", error);
+                setAuthError("Error de autenticación inicial. Intenta de nuevo.");
+            }
+        };
+        initialAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            setUserId(currentUser ? currentUser.uid : null);
+            setAuthReady(true);
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        if (!authReady || !userId) {
+            setCurrency('USD');
+            return;
+        }
+
+        const unsubscribeConfig = onSnapshot(getUserConfigDocRef(userId), (docSnapshot) => {
+            if (docSnapshot.exists() && docSnapshot.data().currency) {
+                setCurrency(docSnapshot.data().currency);
+            } else {
+                setCurrency('USD'); // Default
+            }
+        }, (error) => {
+            console.error("Error al cargar configuración:", error);
+        });
+
+        return () => unsubscribeConfig();
+    }, [authReady, userId]);
+
+    useEffect(() => {
+        if (!authReady || !userId) {
+            setTransactions([]);
+            setLoadingTransactions(false);
+            setDbError('');
+            return;
+        }
+
+        setLoadingTransactions(true);
+        setDbError('');
+
+        try {
+            const q = query(getTransactionsCollectionRef(userId));
+
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                const fetchedTransactions = [];
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    fetchedTransactions.push({
+                        id: doc.id,
+                        ...data,
+                        amount: parseFloat(data.amount) || 0,
+                        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+                    });
+                });
+                
+                fetchedTransactions.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+                
+                setTransactions(fetchedTransactions);
+                setLoadingTransactions(false);
+            }, (error) => {
+                console.error("Error en onSnapshot (Firestore):", error);
+                setDbError("Error al cargar transacciones.");
+                setLoadingTransactions(false);
+            });
+
+            return () => unsubscribe();
+        } catch (e) {
+            console.error("Error al configurar onSnapshot:", e);
+            setDbError("Error al inicializar la conexión con la base de datos.");
+            setLoadingTransactions(false);
+        }
+    }, [authReady, userId]);
+
+    // --- FUNCIONES CRUD (Se mantienen iguales) ---
+    const resetFormState = () => {
+        setCurrentTransaction(null);
+        setDescription('');
+        setAmount('');
+        setType('income');
+        setIsEditing(false);
+        setFormError('');
+    };
+
+    const startEdit = (transaction) => {
+        setCurrentTransaction(transaction);
+        setDescription(transaction.description);
+        setAmount(transaction.amount.toString());
+        setType(transaction.type);
+        setIsEditing(true);
+        setFormError('');
+    };
+
+    const handleAddTransaction = async (e) => {
+        e.preventDefault();
+        setFormError('');
+        if (!userId || !description || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+            setFormError('Por favor, ingresa una descripción y un monto positivo válido.');
+            return;
+        }
+
+        setTransactionLoading(true);
+
+        try {
+            const newTransaction = {
+                description: description,
+                amount: parseFloat(amount),
+                type: type,
+                createdAt: serverTimestamp(),
+            };
+            await addDoc(getTransactionsCollectionRef(userId), newTransaction);
+            resetFormState();
+        } catch (error) {
+            console.error("Error al añadir transacción:", error);
+            setFormError('Error al guardar la transacción. Intenta de nuevo.');
+        } finally {
+            setTransactionLoading(false);
+        }
+    };
+
+    const handleSaveEdit = async (e) => {
+        e.preventDefault();
+        setFormError('');
+        if (!userId || !currentTransaction || !description || !amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+            setFormError('Por favor, completa todos los campos para editar.');
+            return;
+        }
+
+        setTransactionLoading(true);
+
+        try {
+            const transactionRef = doc(getTransactionsCollectionRef(userId), currentTransaction.id);
+            await updateDoc(transactionRef, {
+                description: description,
+                amount: parseFloat(amount),
+                type: type,
+            });
+            
+            resetFormState();
+        } catch (error) {
+            console.error("Error al actualizar transacción:", error);
+            setFormError('Error al actualizar la transacción. Intenta de nuevo.');
+        } finally {
+            setTransactionLoading(false);
+        }
+    };
+
+    const handleDeleteTransaction = async (id) => {
+        if (!userId) return;
+
+        try {
+            const transactionRef = doc(getTransactionsCollectionRef(userId), id);
+            await deleteDoc(transactionRef);
+        } catch (error) {
+            console.error("Error al eliminar transacción:", error);
+            setDbError('Error al eliminar. Intenta de nuevo.');
+        }
+    };
+
+    // --- CÁLCULOS Y FORMATO ---
+    const totalIncome = transactions.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : 0), 0);
+    const totalExpenses = transactions.reduce((acc, t) => acc + (t.type === 'expense' ? t.amount : 0), 0);
+    const totalBalance = totalIncome - totalExpenses;
+    
+    // Formateador de moneda dinámico
+    const formatter = new Intl.NumberFormat('es-ES', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 2,
+    });
+
+    // --- PREPARACIÓN DE DATOS PARA GRÁFICOS (useMemo) ---
+    const { chartData, pieData } = useMemo(() => {
+        // 1. Balance Histórico (AreaChart)
+        const sortedTransactions = [...transactions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+        let runningBalance = 0;
+        const historicalData = sortedTransactions.map(t => {
+            const sign = t.type === 'income' ? 1 : -1;
+            runningBalance += sign * t.amount;
+            return {
+                name: t.createdAt.toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }),
+                balance: parseFloat(runningBalance.toFixed(2)),
+            };
+        });
+
+        // 2. Distribución de Gastos (PieChart)
+        const expenseMap = new Map();
+        transactions.filter(t => t.type === 'expense').forEach(t => {
+            // Usar la descripción como "categoría" temporal
+            const key = t.description.substring(0, 15) + (t.description.length > 15 ? '...' : '');
+            expenseMap.set(key, (expenseMap.get(key) || 0) + t.amount);
+        });
+
+        const pieChartData = Array.from(expenseMap, ([name, value]) => ({ name, value: parseFloat(value.toFixed(2)) }));
+
+        return { chartData: historicalData, pieData: pieChartData };
+    }, [transactions]);
+
+
+    // --- ASISTENTE FINANCIERO CON GEMINI (Se mantiene igual) ---
+    const generateAiResponse = async (isRecommendation) => {
+        setAiLoading(true);
+        setAiError('');
+        setAiResponse(null);
+
+        const financialSummary = `Mi resumen financiero actual es: Balance Total: ${formatter.format(totalBalance)}, Ingresos Totales: ${formatter.format(totalIncome)}, Gastos Totales: ${formatter.format(totalExpenses)}. La moneda es ${CURRENCIES[currency].name} (${currency}). Mis transacciones recientes incluyen: ${transactions.slice(0, 5).map(t => `${t.description} (${t.type}): ${t.amount}`).join(', ')}.`;
+
+        let systemPrompt;
+        let userQuery;
+        let tools = {}; 
+
+        if (isRecommendation) {
+            systemPrompt = `Eres un asesor financiero personal experto. Tu objetivo es proporcionar un análisis conciso y una recomendación práctica en base a los datos proporcionados. Siempre responde en español.`;
+            userQuery = `${financialSummary} Basándote en estos datos, dame una recomendación financiera o un consejo de ahorro en un solo párrafo, centrándote en el balance y los gastos.`;
+        } else {
+            systemPrompt = `Eres un experto en economía global. Analiza el estado económico actual para proporcionar una perspectiva a mi pregunta. Usa la búsqueda web para obtener datos actualizados. Siempre responde en español.`;
+            userQuery = `Según el estado de la economía global, ¿cuál es el pronóstico para el ${CURRENCIES[currency].name} (${currency}) en los próximos 3 meses? Además, analiza mi pregunta: "${aiQuery}".`;
+            tools = { "google_search": {} };
+        }
+        
+        try {
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [tools],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+            
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`Error HTTP: ${response.status}`);
+            }
+
+            const result = await response.json();
+            const candidate = result.candidates?.[0];
+
+            if (candidate && candidate.content?.parts?.[0]?.text) {
+                const text = candidate.content.parts[0].text;
+                
+                let sources = [];
+                const groundingMetadata = candidate.groundingMetadata;
+                if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                    sources = groundingMetadata.groundingAttributions
+                        .map(attribution => ({
+                            uri: attribution.web?.uri,
+                            title: attribution.web?.title,
+                        }))
+                        .filter(source => source.uri && source.title); 
+                }
+
+                setAiResponse({ text, sources });
+
+            } else {
+                setAiError('No se pudo generar una respuesta. Intenta con una consulta diferente.');
+            }
+        } catch (error) {
+            console.error("Error calling Gemini API:", error);
+            setAiError(`Error al consultar a la IA: ${error.message}.`);
+        } finally {
+            setAiLoading(false);
+        }
+    };
+
+    // --- SUBCOMPONENTES DE VISTA (Se mantienen iguales) ---
+
+    const AuthView = () => (
+        <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-sm">
+            <h2 className="text-2xl font-bold mb-4 text-center text-gray-700">
+                {currentView === 'login' ? 'Iniciar Sesión' : 'Registrar Cuenta'}
+            </h2>
+            <form onSubmit={(e) => { e.preventDefault(); handleAuthAction(currentView === 'register'); }}>
+                <div className="mb-4">
+                    <label className="block text-gray-700 text-sm font-semibold mb-2" htmlFor="email">Correo Electrónico</label>
+                    <input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="ejemplo@correo.com" required/>
+                </div>
+                <div className="mb-6">
+                    <label className="block text-gray-700 text-sm font-semibold mb-2" htmlFor="password">Contraseña</label>
+                    <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-indigo-500" placeholder="••••••••" required/>
+                </div>
+                {authError && (
+                    <p className="text-red-600 text-sm italic mb-4 p-2 bg-red-100 rounded text-center">{authError}</p>
+                )}
+                <div className="flex flex-col space-y-3">
+                    <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-xl focus:outline-none focus:ring-4 focus:ring-indigo-300 transition duration-150">
+                        {currentView === 'login' ? 'Iniciar Sesión' : 'Registrarme'}
+                    </button>
+                    <button type="button" onClick={() => { setCurrentView(currentView === 'login' ? 'register' : 'login'); setAuthError(''); }} className="text-sm text-indigo-500 hover:text-indigo-700 transition duration-150">
+                        {currentView === 'login' ? '¿No tienes cuenta? Regístrate' : '¿Ya tienes cuenta? Inicia Sesión'}
+                    </button>
+                </div>
+            </form>
+        </div>
+    );
+
+    const TransactionForm = () => (
+        <div className="bg-white p-6 rounded-xl shadow-lg h-fit">
+            <h2 className="text-2xl font-bold text-gray-700 mb-6 border-b pb-2">
+                {isEditing ? 'Editar Transacción' : 'Añadir Nueva Transacción'}
+            </h2>
+            <form onSubmit={isEditing ? handleSaveEdit : handleAddTransaction} className="space-y-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Descripción
+                    </label>
+                    <input
+                        type="text"
+                        value={description}
+                        onChange={(e) => setDescription(e.target.value)}
+                        className="w-full border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2"
+                        placeholder="Alquiler, Salario, Café..."
+                        required
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Monto ({CURRENCIES[currency].symbol})
+                    </label>
+                    <input
+                        type="number"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        className="w-full border-gray-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2"
+                        placeholder="100.00"
+                        step="0.01"
+                        required
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Tipo
+                    </label>
+                    <div className="flex space-x-4 mt-1">
+                        <label className="inline-flex items-center">
+                            <input
+                                type="radio"
+                                value="income"
+                                checked={type === 'income'}
+                                onChange={() => setType('income')}
+                                className="form-radio text-green-600 h-5 w-5"
+                            />
+                            <span className="ml-2 text-green-700 font-medium">Ingreso</span>
+                        </label>
+                        <label className="inline-flex items-center">
+                            <input
+                                type="radio"
+                                value="expense"
+                                checked={type === 'expense'}
+                                onChange={() => setType('expense')}
+                                className="form-radio text-red-600 h-5 w-5"
+                            />
+                            <span className="ml-2 text-red-700 font-medium">Gasto</span>
+                        </label>
+                    </div>
+                </div>
+
+                {formError && (
+                    <p className="text-red-600 text-sm italic p-2 bg-red-100 rounded text-center">
+                        {formError}
+                    </p>
+                )}
+
+                <button
+                    type="submit"
+                    disabled={transactionLoading}
+                    className={`w-full font-bold py-2.5 rounded-xl shadow-md transition duration-150 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center space-x-2 
+                        ${isEditing ? 'bg-orange-500 hover:bg-orange-600' : 'bg-indigo-600 hover:bg-indigo-700'} text-white`}
+                >
+                    {transactionLoading ? (
+                        <>
+                            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>Guardando...</span>
+                        </>
+                    ) : (
+                        <span>{isEditing ? 'Guardar Cambios' : 'Guardar Transacción'}</span>
+                    )}
+                </button>
+                {isEditing && (
+                    <button
+                        type="button"
+                        onClick={resetFormState}
+                        className="w-full text-sm text-gray-500 hover:text-gray-700 mt-2"
+                    >
+                        Cancelar Edición
+                    </button>
+                )}
+            </form>
+        </div>
+    );
+
+    const ChartCard = ({ title, children }) => (
+        <div className="bg-white p-6 rounded-xl shadow-lg h-80">
+            <h3 className="text-lg font-bold text-gray-700 mb-4 border-b pb-2">{title}</h3>
+            {children}
+        </div>
+    );
+    
+    // --- VISTAS PRINCIPALES ---
+    if (!authReady) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50">
+                <div className="text-lg font-semibold text-indigo-600">
+                    Cargando configuración de Firebase...
+                </div>
+            </div>
+        );
+    }
+
+    if (!user || user.isAnonymous) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-gray-50 p-4">
+                <AuthView />
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-gray-50 p-4 sm:p-8 font-sans">
+            <header className="mb-8 text-center">
+                <h1 className="text-4xl font-extrabold text-indigo-700 mb-2">
+                    Mi Gestor Financiero Inteligente
+                </h1>
+                <p className="text-gray-600">
+                    ID de Usuario: 
+                    <span className="font-mono text-xs ml-2 p-1 bg-indigo-100 rounded-md">
+                        {userId}
+                    </span>
+                </p>
+            </header>
+
+            <div className="max-w-6xl mx-auto">
+                {/* CONFIGURACIÓN Y RESUMEN */}
+                <div className="flex flex-wrap justify-between items-center mb-6 p-4 bg-white rounded-xl shadow-lg">
+                    <div className="flex items-center space-x-4 mb-2 sm:mb-0">
+                        <label htmlFor="currency-select" className="font-bold text-gray-700 text-sm sm:text-base">
+                            Moneda Base:
+                        </label>
+                        <select
+                            id="currency-select"
+                            value={currency}
+                            onChange={(e) => updateCurrency(e.target.value)}
+                            disabled={isConfigLoading}
+                            className="p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition duration-150 text-sm sm:text-base"
+                        >
+                            {Object.keys(CURRENCIES).map(key => (
+                                <option key={key} value={key}>
+                                    {CURRENCIES[key].symbol} ({key}) - {CURRENCIES[key].name}
+                                </option>
+                            ))}
+                        </select>
+                        {isConfigLoading && <span className="text-sm text-gray-500">Guardando...</span>}
+                    </div>
+                    <button
+                        onClick={handleSignOut}
+                        className="text-sm bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-150"
+                    >
+                        Cerrar Sesión
+                    </button>
+                </div>
+
+                {/* Panel de Resumen (Balance, Ingresos, Gastos) */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+                    {/* Saldo Total */}
+                    <div className={`p-4 rounded-xl shadow-lg text-center transition duration-300 ${totalBalance >= 0 ? 'bg-green-100 border-l-4 border-green-500' : 'bg-red-100 border-l-4 border-red-500'}`}>
+                        <h3 className="text-sm font-bold text-gray-700 uppercase">Balance Total</h3>
+                        <p className={`text-3xl font-extrabold ${totalBalance >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                            {formatter.format(totalBalance)}
+                        </p>
+                    </div>
+                    {/* Total Ingresos */}
+                    <div className="p-4 rounded-xl shadow-lg text-center bg-white border-l-4 border-indigo-500">
+                        <h3 className="text-sm font-bold text-gray-700 uppercase">Ingresos</h3>
+                        <p className="text-3xl font-extrabold text-indigo-600">
+                            {formatter.format(totalIncome)}
+                        </p>
+                    </div>
+                    {/* Total Gastos */}
+                    <div className="p-4 rounded-xl shadow-lg text-center bg-white border-l-4 border-red-500">
+                        <h3 className="text-sm font-bold text-gray-700 uppercase">Gastos</h3>
+                        <p className="text-3xl font-extrabold text-red-600">
+                            {formatter.format(totalExpenses)}
+                        </p>
+                    </div>
+                </div>
+
+                {/* GRÁFICOS */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+                    <ChartCard title={`Evolución del Balance Histórico (${currency})`}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0" />
+                                <XAxis dataKey="name" stroke="#6b7280" />
+                                <YAxis tickFormatter={(value) => CURRENCIES[currency].symbol + value} stroke="#6b7280"/>
+                                <Tooltip formatter={(value) => [formatter.format(value), 'Balance']} />
+                                <Area type="monotone" dataKey="balance" stroke="#4f46e5" fill="#a5b4fc" strokeWidth={2} />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </ChartCard>
+
+                    <ChartCard title="Distribución de Gastos">
+                        {pieData.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                                <PieChart>
+                                    <Pie
+                                        data={pieData}
+                                        dataKey="value"
+                                        nameKey="name"
+                                        cx="50%"
+                                        cy="50%"
+                                        outerRadius={80}
+                                        fill="#8884d8"
+                                        labelLine={false}
+                                        label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                                    >
+                                        {pieData.map((entry, index) => (
+                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                                        ))}
+                                    </Pie>
+                                    <Tooltip formatter={(value) => [formatter.format(value), 'Monto']} />
+                                    <Legend layout="vertical" verticalAlign="middle" align="right" />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        ) : (
+                            <p className="text-center text-gray-500 mt-10">Aún no hay gastos para mostrar el gráfico.</p>
+                        )}
+                    </ChartCard>
+                </div>
+
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    {/* Columna de Herramientas: Formulario, Calculadora y Asistente IA */}
+                    <div className="lg:col-span-1 space-y-8">
+                        {/* 1. Formulario de Transacción */}
+                        <TransactionForm />
+
+                        {/* 2. Calculadora de Préstamos/Deudas */}
+                        <LoanCalculator symbol={CURRENCIES[currency].symbol} currencyCode={currency} />
+
+                        {/* 3. Asistente IA */}
+                        <div className="bg-white p-6 rounded-xl shadow-lg border-t-4 border-purple-500">
+                            <h2 className="text-2xl font-bold text-gray-700 mb-4 border-b pb-2 flex items-center">
+                                <span className="mr-2">🤖</span> Asistente Financiero IA
+                            </h2>
+                            <div className="space-y-4">
+                                <button
+                                    onClick={() => generateAiResponse(true)}
+                                    disabled={aiLoading}
+                                    className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 rounded-lg transition duration-150 disabled:bg-gray-400"
+                                >
+                                    {aiLoading && !aiQuery ? 'Analizando...' : 'Recibir Recomendación Personal'}
+                                </button>
+
+                                <div className="space-y-2">
+                                    <input
+                                        type="text"
+                                        value={aiQuery}
+                                        onChange={(e) => setAiQuery(e.target.value)}
+                                        className="w-full border-gray-300 rounded-lg shadow-sm p-2"
+                                        placeholder="Ej: ¿Impacta la inflación en mi ahorro?"
+                                    />
+                                    <button
+                                        onClick={() => aiQuery && generateAiResponse(false)}
+                                        disabled={aiLoading || !aiQuery}
+                                        className="w-full bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 rounded-lg transition duration-150 disabled:bg-gray-400"
+                                    >
+                                        {aiLoading && aiQuery ? 'Consultando Economía...' : 'Consultar Análisis Económico'}
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {/* Resultados de la IA */}
+                            <div className="mt-4 pt-4 border-t border-gray-100">
+                                {aiLoading && (
+                                    <p className="text-center text-blue-500 flex items-center justify-center space-x-2">
+                                        <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                        <span>IA pensando...</span>
+                                    </p>
+                                )}
+                                {aiError && (
+                                    <p className="text-red-500 text-sm">{aiError}</p>
+                                )}
+                                {aiResponse && (
+                                    <div className="p-3 bg-gray-100 rounded-lg border border-gray-200 text-sm">
+                                        <p className="font-semibold mb-2">Respuesta:</p>
+                                        <p>{aiResponse.text}</p>
+                                        {aiResponse.sources.length > 0 && (
+                                            <div className="mt-2 text-xs text-gray-500">
+                                                <p className="font-medium">Fuentes:</p>
+                                                <ul className="list-disc list-inside">
+                                                    {aiResponse.sources.slice(0, 3).map((s, i) => (
+                                                        <li key={i}><a href={s.uri} target="_blank" rel="noopener noreferrer" className="hover:text-indigo-500">{s.title || s.uri}</a></li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                    </div>
+
+                    {/* Columna de Lista de Transacciones */}
+                    <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-lg">
+                        <h2 className="text-2xl font-bold text-gray-700 mb-6 border-b pb-2">
+                            Historial de Transacciones
+                        </h2>
+
+                        {loadingTransactions && (
+                            <p className="text-center text-indigo-500 py-4">Cargando tus transacciones...</p>
+                        )}
+                        {dbError && (
+                            <p className="text-red-600 text-sm italic mb-4 p-2 bg-red-100 rounded text-center">
+                                {dbError}
+                            </p>
+                        )}
+                        
+                        {!loadingTransactions && transactions.length === 0 && !dbError && (
+                            <p className="text-center text-gray-500 py-4 italic">
+                                ¡Aún no tienes transacciones! Agrega una para empezar.
+                            </p>
+                        )}
+
+                        <ul className="space-y-3">
+                            {transactions.map((t) => (
+                                <li
+                                    key={t.id}
+                                    onClick={() => startEdit(t)}
+                                    className={`flex justify-between items-center p-4 rounded-xl shadow-sm transition duration-200 cursor-pointer hover:shadow-md hover:ring-2 hover:ring-indigo-200 border ${t.type === 'income' ? 'border-green-300 bg-green-50' : 'border-red-300 bg-red-50'}`}
+                                >
+                                    <div className="flex-1 min-w-0">
+                                        <p className="font-semibold text-gray-800 truncate">
+                                            {t.description}
+                                        </p>
+                                        <p className="text-xs text-gray-500 mt-0.5">
+                                            {t.createdAt.toLocaleDateString('es-ES', { 
+                                                year: 'numeric', 
+                                                month: 'short', 
+                                                day: 'numeric' 
+                                            })}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center space-x-3">
+                                        <span
+                                            className={`font-bold text-lg ${t.type === 'income' ? 'text-green-700' : 'text-red-700'}`}
+                                        >
+                                            {formatter.format(t.type === 'expense' ? -t.amount : t.amount)}
+                                        </span>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }}
+                                            className="text-gray-400 hover:text-red-500 transition duration-150 p-1 rounded-full hover:bg-red-100"
+                                            title="Eliminar"
+                                        >
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 10-2 0v6a1 1 0 102 0V8z" clipRule="evenodd" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default App;
