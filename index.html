@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor de Clientes y Metas de Venta</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .card {
+            background-color: white;
+            border-radius: 1rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .status-pill-si {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        .status-pill-no {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+    </style>
+</head>
+<body>
+
+<div id="app" class="p-4 md:p-8 space-y-8 max-w-7xl mx-auto">
+    <!-- Header y Estado -->
+    <header class="text-center space-y-2">
+        <h1 class="text-3xl font-extrabold text-gray-800">📊 Gestor Diario de Clientes</h1>
+        <p id="user-info" class="text-sm text-gray-500">Cargando...</p>
+        <p class="text-gray-600">Enfoca tus esfuerzos en clientes prioritarios y objetivos estratégicos.</p>
+        <div id="loading-spinner" class="hidden text-center p-4">
+            <svg class="animate-spin h-5 w-5 text-indigo-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        </div>
+    </header>
+
+    <!-- Sección 1: Foco Diario y Metas MAR (Metas, Acciones, Resultados) -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Foco Diario -->
+        <div class="card p-5 lg:col-span-2 space-y-4">
+            <h2 class="text-xl font-bold text-indigo-700 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 text-red-500"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8"/><path d="M22 19H18a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2z"/><path d="M17 17h6"/></svg>
+                Clientes a Contactar Hoy
+            </h2>
+            <div id="daily-focus-list" class="space-y-3">
+                <p class="text-gray-500">No hay clientes programados para hoy.</p>
+            </div>
+        </div>
+
+        <!-- Metas MAR (Metas, Acciones, Resultados) -->
+        <div class="card p-5 lg:col-span-1 space-y-4">
+            <h2 class="text-xl font-bold text-indigo-700 flex items-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 text-green-500"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                Metas y Resultados (MAR)
+            </h2>
+            <div id="mar-goals-list" class="space-y-3">
+                <p class="text-gray-500 text-sm">Cargando objetivos...</p>
+            </div>
+            <button onclick="openMarModal()" class="w-full mt-4 bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow-md">
+                + Nueva Meta MAR
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Sección 2: Tabla de Clientes Completa y Filtros -->
+    <div class="card p-5 space-y-5">
+        <h2 class="text-xl font-bold text-indigo-700 flex items-center">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2 text-blue-500"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 10V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"/></svg>
+            Clientes y Oportunidades Totales
+        </h2>
+        
+        <!-- Filtros -->
+        <div class="flex flex-col md:flex-row space-y-3 md:space-y-0 md:space-x-4">
+            <div>
+                <label for="filter-industry" class="block text-sm font-medium text-gray-700">Filtrar por Industria</label>
+                <select id="filter-industry" onchange="renderClientTable()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                    <option value="ALL">Todas las Industrias</option>
+                </select>
+            </div>
+            <div>
+                <label for="filter-classification" class="block text-sm font-medium text-gray-700">Filtrar por Clasificación</label>
+                <select id="filter-classification" onchange="renderClientTable()" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+                    <option value="ALL">Todas las Clasificaciones</option>
+                    <option value="a">A (Alta)</option>
+                    <option value="b">B (Media)</option>
+                    <option value="c">C (Baja)</option>
+                </select>
+            </div>
+            <button onclick="openClientModal()" class="md:self-end bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 shadow-md">
+                + Añadir Cliente
+            </button>
+        </div>
+
+        <!-- Tabla -->
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Empresa</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ind.</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Clasif.</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cita/Port.</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Prob. Negocio</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Estrategia y Contacto</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="client-table-body" class="bg-white divide-y divide-gray-200">
+                    <!-- Filas de clientes se renderizarán aquí -->
+                    <tr><td colspan="7" class="py-4 text-center text-gray-500">Cargando datos...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Clientes (Agregar/Editar) -->
+<div id="client-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:max-w-xl card">
+        <div class="mt-3 text-center">
+            <h3 class="text-lg leading-6 font-medium text-gray-900" id="client-modal-title">Añadir Nuevo Cliente</h3>
+            <form id="client-form" class="mt-4 space-y-4 text-left">
+                <input type="hidden" id="client-id">
+                
+                <div>
+                    <label for="company-name" class="block text-sm font-medium text-gray-700">Empresa</label>
+                    <input type="text" id="company-name" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="industry" class="block text-sm font-medium text-gray-700">Industria</label>
+                        <select id="industry" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border"></select>
+                    </div>
+                    <div>
+                        <label for="classification" class="block text-sm font-medium text-gray-700">Clasificación (a, b, c)</label>
+                        <select id="classification" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                            <option value="a">A (Alta)</option>
+                            <option value="b">B (Media)</option>
+                            <option value="c">C (Baja)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label for="cita-conseguida" class="block text-sm font-medium text-gray-700">Cita/Portafolio Realizada</label>
+                        <select id="cita-conseguida" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                            <option value="NO">NO</option>
+                            <option value="SI">SI</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="next-contact-date" class="block text-sm font-medium text-gray-700">Fecha Próximo Contacto</label>
+                        <input type="date" id="next-contact-date" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                    </div>
+                </div>
+
+                <div>
+                    <label for="strategy" class="block text-sm font-medium text-gray-700">Estrategia / Próximo Paso</label>
+                    <input type="text" id="strategy" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                </div>
+                
+                <div class="flex justify-end space-x-4 pt-4">
+                    <button type="button" onclick="closeClientModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200" id="client-save-button">
+                        Guardar Cliente
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Modal para Metas MAR (Agregar/Editar) -->
+<div id="mar-modal" class="hidden fixed inset-0 bg-gray-600 bg-opacity-75 overflow-y-auto h-full w-full z-50">
+    <div class="relative top-20 mx-auto p-5 border w-11/12 md:max-w-xl card">
+        <div class="mt-3 text-center">
+            <h3 class="text-lg leading-6 font-medium text-gray-900" id="mar-modal-title">Nueva Meta MAR</h3>
+            <form id="mar-form" class="mt-4 space-y-4 text-left">
+                <input type="hidden" id="mar-id">
+                
+                <div>
+                    <label for="mar-meta" class="block text-sm font-medium text-gray-700">Meta/Objetivo</label>
+                    <textarea id="mar-meta" required rows="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border"></textarea>
+                </div>
+                <div>
+                    <label for="mar-accion" class="block text-sm font-medium text-gray-700">Acción/Estrategia Principal</label>
+                    <textarea id="mar-accion" required rows="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border"></textarea>
+                </div>
+                <div>
+                    <label for="mar-resultado" class="block text-sm font-medium text-gray-700">Resultado / Estado Actual</label>
+                    <select id="mar-resultado" required class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-2 border">
+                        <option value="En Curso">En Curso</option>
+                        <option value="Completada">Completada</option>
+                        <option value="Detenida">Detenida</option>
+                    </select>
+                </div>
+                
+                <div class="flex justify-end space-x-4 pt-4">
+                    <button type="button" onclick="closeMarModal()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg transition duration-200">
+                        Guardar Meta
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, onSnapshot, collection, query, getDocs, writeBatch, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    setLogLevel('Debug');
+
+    let db;
+    let auth;
+    let clients = [];
+    let marGoals = [];
+    let userId = null;
+    let isAuthReady = false;
+
+    // --- Configuración e Inicialización de Firebase (MANDATORIO) ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+    const CLIENTS_COLLECTION = `artifacts/${appId}/public/data/sales_clients`;
+    const MAR_COLLECTION = `artifacts/${appId}/public/data/sales_goals`;
+    
+    // Datos iniciales proporcionados por el usuario
+    const initialClientData = [
+        { "Company (Account) name": "Hospital San Juan De Dios", "Industry": "Banca y finanzas", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Llamada de seguimiento, Oportunidad 1", "Fecha Próximo Contacto": new Date(Date.now()).toISOString().split('T')[0] },
+        { "Company (Account) name": "Banco Agromercantil - BAM", "Industry": "Banca y finanzas", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Primer acercamiento, cold call", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "INDE", "Industry": "Educación", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Reunión técnica, revisar requisitos", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 2)) },
+        { "Company (Account) name": "Ministerio de la Defensa", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Identificar contacto clave", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 3)) },
+        { "Company (Account) name": "Ministerio de Salud", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Llamada de prospección", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "ICASA - Cerveceria", "Industry": "Industria", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Email de presentación de valor", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 4)) },
+        { "Company (Account) name": "Grupo CMI", "Industry": "Industria", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Buscar referencias internas", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "ministerio de comunicaciones", "Industry": "Servicios", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Investigar presupuesto", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 5)) },
+        { "Company (Account) name": "Ministerio de Economia", "Industry": "Banca y finanzas", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Envío de propuesta económica", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "Registro de la Propiedad", "Industry": "Educación", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Definir caso de estudio", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 6)) },
+        { "Company (Account) name": "Superintendencia de Bancos", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Llamada de seguimiento, reunión informativa", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 2)) },
+        { "Company (Account) name": "Mides", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Validar cronograma de ejecución", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 7)) },
+        { "Company (Account) name": "PDH", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Cierre de negocio, proponer contrato", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "PGN", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Presentación a comité ejecutivo", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 8)) },
+        { "Company (Account) name": "INE", "Industry": "Gobierno", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 3, "Estrategia": "Solicitar feedback formal", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "Gasolineras Uno", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 3, "Estrategia": "Demostración de producto/servicio", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 9)) },
+        { "Company (Account) name": "Bayer de Centroamerica", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Investigación de necesidades", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 2)) },
+        { "Company (Account) name": "Infasa", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Contacto inicial por LinkedIn", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 10)) },
+        { "Company (Account) name": "Ingenio Pantaleon", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Llamada de prospección", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 3)) },
+        { "Company (Account) name": "Grupo AG", "Industry": "Industria", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Email de seguimiento de contacto", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "IGSS", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "NO", "Leads Generados": null, "Estrategia": "Definir quién es el decisor", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 11)) },
+        { "Company (Account) name": "Agexport", "Industry": "servicios", "Clasificacion de Cuentas": "b", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": 2, "Estrategia": "Preparar demo personalizada", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "Contraloria", "Industry": "Telco", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Reunión de aclaración de dudas", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 12)) },
+        { "Company (Account) name": "OJ", "Industry": "Gobierno", "Clasificacion de Cuentas": "a", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Propuesta y negociación final", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 1)) },
+        { "Company (Account) name": "INACIF", "Industry": "Gobierno", "Clasificacion de Cuentas": "c", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Seguimiento de cierre", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 13)) },
+        { "Company (Account) name": "Instituto Nacional de Migracion", "Industry": "Gobierno", "Clasificacion de Cuentas": "c", "CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?": "SI", "Leads Generados": null, "Estrategia": "Llamada para definir fecha de inicio", "Fecha Próximo Contacto": formatDate(addDays(new Date(), 14)) },
+    ];
+
+    function addDays(date, days) {
+        const result = new Date(date);
+        result.setDate(result.getDate() + days);
+        return result;
+    }
+
+    function formatDate(date) {
+        return date.toISOString().split('T')[0];
+    }
+
+    async function initializeAppAndAuth() {
+        try {
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            auth = getAuth(app);
+            
+            // 1. Autenticación
+            document.getElementById('loading-spinner').classList.remove('hidden');
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            onAuthStateChanged(auth, (user) => {
+                if (user) {
+                    userId = user.uid;
+                    document.getElementById('user-info').textContent = `Conectado como: ${userId}`;
+                    isAuthReady = true;
+                    // 2. Carga inicial de datos
+                    checkAndPopulateData();
+                    // 3. Iniciar Listeners
+                    setupFirestoreListeners();
+                } else {
+                    console.error("No se pudo autenticar al usuario.");
+                    document.getElementById('user-info').textContent = 'Error de autenticación.';
+                }
+                document.getElementById('loading-spinner').classList.add('hidden');
+            });
+
+        } catch (error) {
+            console.error("Error al inicializar Firebase o autenticar:", error);
+            document.getElementById('user-info').textContent = `Error de conexión: ${error.message}`;
+        }
+    }
+
+    async function checkAndPopulateData() {
+        try {
+            const clientsRef = collection(db, CLIENTS_COLLECTION);
+            const snapshot = await getDocs(clientsRef);
+
+            if (snapshot.empty) {
+                console.log("Colección de clientes vacía. Iniciando carga de datos iniciales...");
+                const batch = writeBatch(db);
+
+                initialClientData.forEach((data, index) => {
+                    // Genera un ID único para cada documento
+                    const newDocRef = doc(clientsRef); 
+                    const clientData = {
+                        ...data,
+                        id: newDocRef.id,
+                        'Ejecutivo de Ventas': 'harold', // Establecer el ejecutivo de ventas
+                        'Leads Generados': data['Leads Generados'] || 0,
+                        'Country': 'Guatemala'
+                    };
+                    batch.set(newDocRef, clientData);
+                });
+
+                await batch.commit();
+                console.log("Datos iniciales cargados con éxito.");
+            }
+        } catch (error) {
+            console.error("Error al poblar los datos iniciales:", error);
+        }
+    }
+
+    function calculateProbability(client) {
+        const classification = client['Clasificacion de Cuentas'].toLowerCase();
+        const cita = client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?'] === 'SI';
+
+        if (cita) {
+            if (classification === 'a') return 80;
+            if (classification === 'b') return 60;
+            if (classification === 'c') return 40;
+        } else {
+            if (classification === 'a') return 30;
+            if (classification === 'b') return 15;
+            if (classification === 'c') return 5;
+        }
+        return 0;
+    }
+
+    function setupFirestoreListeners() {
+        if (!isAuthReady) return;
+
+        // Listener para Clientes
+        const clientsQuery = query(collection(db, CLIENTS_COLLECTION));
+        onSnapshot(clientsQuery, (snapshot) => {
+            clients = snapshot.docs.map(doc => ({ 
+                id: doc.id, 
+                ...doc.data(), 
+                probability: calculateProbability(doc.data()) // Calcular probabilidad al cargar
+            })).sort((a, b) => b.probability - a.probability); // Ordenar por probabilidad
+
+            renderIndustryFilter();
+            renderClientTable();
+            renderDailyFocus();
+        }, (error) => {
+            console.error("Error listening to clients:", error);
+        });
+
+        // Listener para Metas MAR
+        const marQuery = query(collection(db, MAR_COLLECTION));
+        onSnapshot(marQuery, (snapshot) => {
+            marGoals = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            renderMarGoals();
+        }, (error) => {
+            console.error("Error listening to MAR goals:", error);
+        });
+    }
+
+    // --- Funciones de Renderizado ---
+
+    function renderIndustryFilter() {
+        const industrySelect = document.getElementById('filter-industry');
+        const uniqueIndustries = new Set(clients.map(c => c.Industry));
+        
+        // Mantener la opción seleccionada si existe
+        const currentSelection = industrySelect.value;
+        
+        industrySelect.innerHTML = '<option value="ALL">Todas las Industrias</option>';
+        uniqueIndustries.forEach(industry => {
+            const option = document.createElement('option');
+            option.value = industry;
+            option.textContent = industry;
+            industrySelect.appendChild(option);
+        });
+
+        if (currentSelection) {
+            industrySelect.value = currentSelection;
+        }
+    }
+
+    function renderDailyFocus() {
+        const today = new Date().toISOString().split('T')[0];
+        const yesterday = formatDate(addDays(new Date(), -1));
+
+        // Clientes para contactar hoy o ayer (si se pasaron)
+        const dailyClients = clients.filter(c => 
+            c['Fecha Próximo Contacto'] === today || c['Fecha Próximo Contacto'] === yesterday
+        ).sort((a, b) => {
+            // Priorizar 'A' sobre 'B' sobre 'C'
+            const classOrder = { 'a': 3, 'b': 2, 'c': 1 };
+            return classOrder[b['Clasificacion de Cuentas'].toLowerCase()] - classOrder[a['Clasificacion de Cuentas'].toLowerCase()];
+        });
+
+        const listContainer = document.getElementById('daily-focus-list');
+        listContainer.innerHTML = '';
+
+        if (dailyClients.length === 0) {
+            listContainer.innerHTML = '<p class="text-gray-500 italic">¡Hoy tienes el día libre de seguimientos directos! Enfócate en la prospección o en las Metas MAR.</p>';
+            return;
+        }
+
+        dailyClients.forEach(client => {
+            const element = document.createElement('div');
+            element.className = 'flex justify-between items-center p-3 border-l-4 border-indigo-500 bg-gray-50 rounded-lg shadow-sm';
+            element.innerHTML = `
+                <div>
+                    <p class="font-semibold text-gray-800">${client['Company (Account) name']}</p>
+                    <p class="text-sm text-gray-600">${client.Estrategia}</p>
+                </div>
+                <div class="flex flex-col items-end space-y-1">
+                    <span class="px-2 py-0.5 text-xs font-medium rounded-full ${client['Clasificacion de Cuentas'] === 'a' ? 'bg-red-100 text-red-800' : client['Clasificacion de Cuentas'] === 'b' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'}">
+                        Clasif. ${client['Clasificacion de Cuentas'].toUpperCase()}
+                    </span>
+                    <button onclick="openClientModal('${client.id}')" class="text-xs text-indigo-500 hover:text-indigo-700 font-medium">
+                        Actualizar
+                    </button>
+                </div>
+            `;
+            listContainer.appendChild(element);
+        });
+    }
+
+    function renderClientTable() {
+        const tableBody = document.getElementById('client-table-body');
+        const filterIndustry = document.getElementById('filter-industry').value;
+        const filterClassification = document.getElementById('filter-classification').value;
+
+        let filteredClients = clients;
+
+        if (filterIndustry !== 'ALL') {
+            filteredClients = filteredClients.filter(c => c.Industry === filterIndustry);
+        }
+        if (filterClassification !== 'ALL') {
+            filteredClients = filteredClients.filter(c => c['Clasificacion de Cuentas'].toLowerCase() === filterClassification);
+        }
+
+        tableBody.innerHTML = '';
+
+        if (filteredClients.length === 0) {
+            tableBody.innerHTML = `<tr><td colspan="7" class="py-4 text-center text-gray-500">No hay clientes que coincidan con los filtros.</td></tr>`;
+            return;
+        }
+
+        filteredClients.forEach(client => {
+            const row = document.createElement('tr');
+            row.className = 'hover:bg-gray-50 transition duration-150';
+
+            const citaStatus = client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?'];
+            const citaClass = citaStatus === 'SI' ? 'status-pill-si' : 'status-pill-no';
+
+            row.innerHTML = `
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-medium text-gray-900">
+                    ${client['Company (Account) name']}
+                </td>
+                <td class="px-3 py-3 whitespace-nowrap text-sm text-gray-500">${client.Industry}</td>
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-semibold">${client['Clasificacion de Cuentas'].toUpperCase()}</td>
+                <td class="px-3 py-3 whitespace-nowrap">
+                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${citaClass}">${citaStatus}</span>
+                </td>
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-bold text-green-700">${client.probability}%</td>
+                <td class="px-3 py-3 text-xs text-gray-600">
+                    <span class="block font-medium">${client.Estrategia || 'N/A'}</span>
+                    <span class="block italic text-gray-400">Prox: ${client['Fecha Próximo Contacto']}</span>
+                </td>
+                <td class="px-3 py-3 whitespace-nowrap text-sm font-medium">
+                    <button onclick="openClientModal('${client.id}')" class="text-indigo-600 hover:text-indigo-900 font-semibold text-xs">
+                        Editar
+                    </button>
+                </td>
+            `;
+            tableBody.appendChild(row);
+        });
+    }
+    
+    function renderMarGoals() {
+        const listContainer = document.getElementById('mar-goals-list');
+        listContainer.innerHTML = '';
+
+        if (marGoals.length === 0) {
+            listContainer.innerHTML = '<p class="text-gray-500 text-sm italic">Añade tus metas de la semana/mes para tener un foco claro.</p>';
+            return;
+        }
+
+        marGoals.forEach(goal => {
+            const element = document.createElement('div');
+            let color = 'border-gray-400';
+            if (goal.Resultado === 'Completada') color = 'border-green-500';
+            else if (goal.Resultado === 'En Curso') color = 'border-indigo-500';
+            else if (goal.Resultado === 'Detenida') color = 'border-red-500';
+
+            element.className = `p-3 border-l-4 ${color} bg-white rounded-lg shadow-sm border`;
+            element.innerHTML = `
+                <p class="font-semibold text-sm text-gray-800">${goal.Meta}</p>
+                <p class="text-xs text-gray-600 mt-1"><span class="font-medium">Estrategia:</span> ${goal.Accion}</p>
+                <div class="flex justify-between items-center mt-2">
+                    <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-gray-200 text-gray-700">${goal.Resultado}</span>
+                    <button onclick="openMarModal('${goal.id}')" class="text-xs text-blue-500 hover:text-blue-700 font-medium">
+                        Editar
+                    </button>
+                </div>
+            `;
+            listContainer.appendChild(element);
+        });
+    }
+
+    // --- Funciones de Modal y CRUD (Crear, Leer, Actualizar, Borrar) ---
+
+    window.openClientModal = function(id = null) {
+        const modal = document.getElementById('client-modal');
+        const title = document.getElementById('client-modal-title');
+        const button = document.getElementById('client-save-button');
+        const form = document.getElementById('client-form');
+        form.reset(); 
+
+        const industrySelect = document.getElementById('industry');
+        // Llenar el select de industria si no está lleno
+        if (industrySelect.options.length <= 1) { 
+            const uniqueIndustries = new Set(clients.map(c => c.Industry).filter(i => i));
+            uniqueIndustries.forEach(industry => {
+                const option = document.createElement('option');
+                option.value = industry;
+                option.textContent = industry;
+                industrySelect.appendChild(option);
+            });
+            // Añadir industrias estáticas si es necesario
+            ['Banca y finanzas', 'Educación', 'Gobierno', 'Industria', 'Servicios', 'Telco'].forEach(i => {
+                if (!uniqueIndustries.has(i)) {
+                    const option = document.createElement('option');
+                    option.value = i;
+                    option.textContent = i;
+                    industrySelect.appendChild(option);
+                }
+            });
+        }
+        
+        document.getElementById('client-id').value = id || '';
+        if (id) {
+            const client = clients.find(c => c.id === id);
+            title.textContent = 'Editar Cliente';
+            button.textContent = 'Actualizar Cliente';
+            
+            if (client) {
+                document.getElementById('company-name').value = client['Company (Account) name'];
+                document.getElementById('industry').value = client.Industry;
+                document.getElementById('classification').value = client['Clasificacion de Cuentas'].toLowerCase();
+                document.getElementById('cita-conseguida').value = client['CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?'];
+                document.getElementById('next-contact-date').value = client['Fecha Próximo Contacto'] || formatDate(new Date());
+                document.getElementById('strategy').value = client.Estrategia || '';
+            }
+        } else {
+            title.textContent = 'Añadir Nuevo Cliente';
+            button.textContent = 'Guardar Cliente';
+            // Valores por defecto
+            document.getElementById('classification').value = 'c';
+            document.getElementById('cita-conseguida').value = 'NO';
+            document.getElementById('next-contact-date').value = formatDate(new Date());
+        }
+        modal.classList.remove('hidden');
+    }
+
+    window.closeClientModal = function() {
+        document.getElementById('client-modal').classList.add('hidden');
+    }
+
+    document.getElementById('client-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('client-id').value;
+        
+        const clientData = {
+            'Company (Account) name': document.getElementById('company-name').value.trim(),
+            'Industry': document.getElementById('industry').value,
+            'Clasificacion de Cuentas': document.getElementById('classification').value.toUpperCase(),
+            'CITA CONSEGUIDA Y PRESENTACION DE PORTAFOLIO REALIZADA?': document.getElementById('cita-conseguida').value,
+            'Fecha Próximo Contacto': document.getElementById('next-contact-date').value,
+            'Estrategia': document.getElementById('strategy').value.trim(),
+            'Ejecutivo de Ventas': 'harold',
+            'Country': 'Guatemala',
+            'Leads Generados': 0 // Se asume 0 o se obtiene del cliente existente si es edición.
+        };
+
+        try {
+            if (id) {
+                // Actualizar
+                const clientRef = doc(db, CLIENTS_COLLECTION, id);
+                await setDoc(clientRef, clientData, { merge: true });
+                console.log("Cliente actualizado:", id);
+            } else {
+                // Crear
+                const clientsRef = collection(db, CLIENTS_COLLECTION);
+                await setDoc(doc(clientsRef), clientData);
+                console.log("Cliente añadido.");
+            }
+            closeClientModal();
+        } catch (error) {
+            console.error("Error al guardar el cliente:", error);
+        }
+    });
+
+    window.openMarModal = function(id = null) {
+        const modal = document.getElementById('mar-modal');
+        const title = document.getElementById('mar-modal-title');
+        const form = document.getElementById('mar-form');
+        form.reset();
+
+        document.getElementById('mar-id').value = id || '';
+        if (id) {
+            const goal = marGoals.find(g => g.id === id);
+            title.textContent = 'Editar Meta MAR';
+            if (goal) {
+                document.getElementById('mar-meta').value = goal.Meta || '';
+                document.getElementById('mar-accion').value = goal.Accion || '';
+                document.getElementById('mar-resultado').value = goal.Resultado || 'En Curso';
+            }
+        } else {
+            title.textContent = 'Nueva Meta MAR';
+            document.getElementById('mar-resultado').value = 'En Curso';
+        }
+        modal.classList.remove('hidden');
+    }
+
+    window.closeMarModal = function() {
+        document.getElementById('mar-modal').classList.add('hidden');
+    }
+
+    document.getElementById('mar-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = document.getElementById('mar-id').value;
+        
+        const marData = {
+            'Meta': document.getElementById('mar-meta').value.trim(),
+            'Accion': document.getElementById('mar-accion').value.trim(),
+            'Resultado': document.getElementById('mar-resultado').value,
+            'Ejecutivo de Ventas': 'harold',
+        };
+
+        try {
+            if (id) {
+                // Actualizar
+                const goalRef = doc(db, MAR_COLLECTION, id);
+                await setDoc(goalRef, marData, { merge: true });
+                console.log("Meta MAR actualizada:", id);
+            } else {
+                // Crear
+                const marRef = collection(db, MAR_COLLECTION);
+                await setDoc(doc(marRef), marData);
+                console.log("Meta MAR añadida.");
+            }
+            closeMarModal();
+        } catch (error) {
+            console.error("Error al guardar la Meta MAR:", error);
+        }
+    });
+
+    // Iniciar la aplicación
+    initializeAppAndAuth();
+
+</script>
+
+</body>
+</html>
+
