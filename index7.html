@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infografía: Filtrado Selectivo L7 con Radware</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px; 
+            max-height: 350px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .network-device {
+            @apply bg-[#19376D] text-white p-3 rounded-lg shadow-xl flex items-center justify-center space-x-2;
+        }
+        .connection-line {
+            @apply w-1 h-8 bg-[#576CBC] mx-auto;
+        }
+        .line-dot {
+            @apply w-2 h-2 rounded-full bg-[#A5D7E8] mx-auto;
+        }
+        .device-icon {
+            font-size: 1.5rem;
+        }
+    </style>
+</head>
+<body class="bg-[#0B2447] text-white">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-5xl">
+
+        <header class="text-center mb-16">
+            <h1 class="text-4xl md:text-5xl font-bold text-[#A5D7E8] mb-4">Seguridad Granular para Aplicaciones Críticas</h1>
+            <p class="text-lg md:text-xl text-[#576CBC] mb-2">Demostración de Filtrado Selectivo L7 de Radware para Tráfico Consolidado desde una VPN</p>
+            <p class="text-md font-semibold text-white">Presentado a: Contraloría General de Cuentas</p>
+            <!-- ACTULIZADO: Se agrega Soluciones Seguras -->
+            <p class="text-sm text-[#A5D7E8]/70">Por: Harold Ocaña, Account Manager, Soluciones Seguras</p>
+        </header>
+
+        <main class="space-y-20">
+            
+            <section id="desafio" class="p-8 bg-[#19376D] rounded-2xl shadow-xl">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                    <div>
+                        <h2 class="text-3xl font-bold text-[#A5D7E8] mb-4">1. El Desafío: Tráfico Consolidado</h2>
+                        <p class="text-[#A5D7E8] mb-4">Toda la comunicación de los usuarios, ya sean de prueba o auditores, ingresa a la red a través de un túnel VPN. Esto resulta en una **única dirección IP de origen** para todas las solicitudes, creando un punto ciego para la seguridad tradicional.</p>
+                        <p class="text-[#A5D7E8] mb-4 font-bold">IMPORTANTE: El volumen total del tráfico de la red para la demostración se limita a un máximo de 8 GB.</p>
+                        <p class="text-sm text-[#576CBC]">Un firewall perimetral, que opera en L3/L4, no puede distinguir a qué aplicación se dirige el tráfico, permitiendo que todas las solicitudes pasen sin una inspección a nivel de aplicación.</p>
+                    </div>
+                    <div class="flex flex-col items-center justify-center space-y-4 p-4 bg-[#0B2447] rounded-lg">
+                        <div class="text-center">
+                            <span class="text-4xl">👤👤👤</span>
+                            <p class="font-semibold">Usuarios Múltiples</p>
+                        </div>
+                        <div class="text-2xl text-[#576CBC]">↓</div>
+                        <!-- EDICIÓN: Borde más grueso y color de acento para enfatizar el túnel VPN. -->
+                        <div class="text-center p-3 border-4 border-dashed border-[#A5D7E8] rounded-lg">
+                            <span class="text-4xl">🌐</span>
+                            <p class="font-semibold">Túnel VPN</p>
+                        </div>
+                        <div class="text-2xl text-[#576CBC]">↓</div>
+                        <div class="text-center p-3 bg-[#A5D7E8] text-[#0B2447] rounded-full w-48">
+                            <p class="font-bold">1 ÚNICA IP DE ORIGEN</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="arquitectura" class="p-8 bg-[#19376D] rounded-2xl shadow-xl">
+                <!-- ACTUALIZACIÓN: Se cambia el título y la descripción para incluir el concepto de Secure Path y la solución híbrida. -->
+                <h2 class="text-3xl font-bold text-[#A5D7E8] mb-8 text-center">2. Arquitectura Híbrida y Secure Path</h2>
+                <p class="max-w-4xl mx-auto text-[#A5D7E8] mb-8 text-center">El Radware Alteon se ubica estratégicamente On-Premise para el Balanceo L7. El modo **Secure Path** se activa para redirigir selectivamente el tráfico a la **Plataforma Cloud WAF/DDoS** (DefensePro) antes de llegar a los servidores, combinando la eficiencia local con la capacidad de mitigación en la nube.</p>
+                
+                <div class="flex flex-col items-center justify-center space-y-2">
+                    
+                    <!-- NUEVO: Plataforma Cloud WAF/DDoS -->
+                    <div class="network-device bg-purple-700 text-sm font-bold p-3 mb-4">
+                        <span class="device-icon text-xl">🛡️☁️</span>
+                        <span>CLOUD WAF & DEFENSEPRO (DDoS)</span>
+                    </div>
+                    <div class="text-xs text-yellow-300 font-bold">Secure Path Activo (Tráfico Selectivo)</div>
+                    <div class="connection-line h-6 bg-purple-400"></div>
+
+                    <!-- Fila 1: Firewall -->
+                    <div class="network-device bg-red-700 font-bold">
+                        <span class="device-icon">🔒</span>
+                        <span>FIREWALL PERIMETRAL (L3/L4)</span>
+                    </div>
+                    <div class="connection-line"></div>
+                    
+                    <!-- Fila 2: VLAN WAN -->
+                    <div class="network-device bg-orange-600 text-sm py-1">VLAN WAN</div>
+                    <div class="connection-line h-4"></div>
+                    <div class="text-sm text-[#A5D7E8] font-bold">Po1 (Puerto WAN)</div>
+
+                    <!-- Fila 3: ALTEON -->
+                    <div class="network-device bg-indigo-800 border-4 border-[#A5D7E8] p-5 w-64 text-center block">
+                        <h3 class="font-bold text-xl text-[#A5D7E8] flex items-center justify-center space-x-2">
+                            <span class="device-icon text-2xl">⚙️</span>
+                            <span>Radware ALTEON</span>
+                        </h3>
+                        <p class="text-xs text-yellow-300">(ADC/WAF) Punto de Balanceo y Filtrado L7</p>
+                    </div>
+
+                    <div class="text-sm text-[#A5D7E8] font-bold">Po2 (Puerto LAN)</div>
+                    <div class="connection-line h-4"></div>
+
+                    <!-- Fila 4: VLAN LAN -->
+                    <div class="network-device bg-blue-600 text-sm py-1">VLAN LAN</div>
+                    <div class="connection-line"></div>
+
+                    <!-- Fila 5: Distribución a Servidores -->
+                    <div class="flex justify-center w-full max-w-md mt-4">
+                        <!-- Línea a Servidor 1 -->
+                        <div class="flex flex-col items-center mx-4">
+                            <div class="w-1 h-8 bg-green-500"></div>
+                            <div class="network-device bg-gray-700 text-center border-l-4 border-green-500 block">
+                                <span class="device-icon">💻</span>
+                                <span class="text-lg font-bold">APP 1</span>
+                                <p class="text-xs text-green-300">Crítica</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Línea a Servidor 2 -->
+                        <div class="flex flex-col items-center mx-4">
+                            <div class="w-1 h-8 bg-yellow-500"></div>
+                            <div class="network-device bg-gray-700 text-center border-l-4 border-yellow-500 block">
+                                <span class="device-icon">💻</span>
+                                <span class="text-lg font-bold">APP 2</span>
+                                <p class="text-xs text-yellow-300">Prueba</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-10 p-4 bg-[#0B2447] rounded-lg max-w-2xl mx-auto">
+                    <!-- ACTUALIZACIÓN: Se especifica el Balanceo L7 y la función de Secure Path. -->
+                    <h3 class="text-2xl font-bold text-[#A5D7E8] mb-2 text-center">Función Clave: Balanceo de Carga (ADC) L7</h3>
+                    <p class="text-md text-[#576CBC] text-center">El Alteon no solo garantiza la alta disponibilidad, sino que realiza Balanceo en **Capa 7** (L7), permitiendo la distribución inteligente del tráfico basada en el contenido (ej: URL o Host Header).</p>
+                    <p class="text-sm text-center text-[#A5D7E8] mt-2">El **Secure Path** permite que solo el tráfico de alto riesgo o que cumple ciertas condiciones sea redirigido a la nube para mitigación, optimizando el rendimiento On-Premise.</p>
+                </div>
+            </section>
+
+            <section id="solucion" class="text-center p-8">
+                <!-- ACTUALIZACIÓN: Título y texto reforzando el Balanceo L7. -->
+                 <h2 class="text-3xl font-bold text-[#A5D7E8] mb-4">3. La Solución Lógica: Punto de Decisión L7 y Filtrado Selectivo</h2>
+                 <p class="max-w-3xl mx-auto text-[#A5D7E8] mb-8">El Alteon realiza el Balanceo L7 e inspecciona el contenido de cada solicitud en la **Capa 7** para tomar decisiones de seguridad y enrutamiento precisas (**Content Switching**), resolviendo el problema de la IP única.</p>
+                 <div class="p-6 bg-[#19376D] rounded-2xl shadow-xl max-w-md mx-auto">
+                    <h3 class="text-2xl font-bold text-white">MECANISMO: CONTENT SWITCHING</h3>
+                    <p class="mt-2 text-[#A5D7E8]">El Alteon lee el encabezado <span class="font-mono bg-[#0B2447] px-2 py-1 rounded">HTTP Host Header</span> (ej: `app1.demo.com`) para identificar la aplicación de destino y aplicar la política de seguridad y el pool de balanceo correcto.</p>
+                 </div>
+            </section>
+            
+            <section id="aplicacion" class="p-8 bg-[#19376D] rounded-2xl shadow-xl">
+                <h2 class="text-3xl font-bold text-[#A5D7E8] mb-8 text-center">4. Segmentación y Aplicación de Políticas</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                    
+                    <div class="flex flex-col space-y-6">
+                        <h3 class="text-2xl font-bold text-center text-green-400">Ruta 1: Aplicación Crítica</h3>
+                        <div class="p-4 bg-[#0B2447] rounded-lg text-center">
+                            <p class="text-sm text-[#576CBC]">Ruta Lógica</p>
+                            <p class="font-mono font-bold text-green-300">Host Header = 'app1.demo.com'</p>
+                        </div>
+                        <p class="text-center text-[#A5D7E8]">El tráfico hacia la aplicación crítica (CRM, Financiera) recibe la máxima protección **On-Premise y/o vía Secure Path al Cloud WAF** para detener ataques complejos y de día cero.</p>
+                        <div class="chart-container">
+                            <canvas id="ataquesBloqueadosChart"></canvas>
+                        </div>
+                         <p class="text-center font-semibold text-sm text-green-400">Resultado: El 99% de los intentos de inyección SQL son bloqueados instantáneamente, asegurando la integridad de los datos.</p>
+                    </div>
+
+                    <div class="flex flex-col space-y-6">
+                        <h3 class="text-2xl font-bold text-center text-yellow-400">Ruta 2: Aplicación de Prueba</h3>
+                         <div class="p-4 bg-[#0B2447] rounded-lg text-center">
+                            <p class="text-sm text-[#576CBC]">Ruta Lógica</p>
+                            <p class="font-mono font-bold text-yellow-300">Host Header = 'app2.demo.com'</p>
+                        </div>
+                        <p class="text-center text-[#A5D7E8]">El tráfico a aplicaciones menos críticas o estáticas se enruta sin inspección profunda, priorizando la velocidad y la baja latencia.</p>
+                        <div class="chart-container">
+                            <canvas id="latenciaChart"></canvas>
+                        </div>
+                        <p class="text-center font-semibold text-sm text-yellow-400">Resultado: La latencia se reduce drásticamente, garantizando una experiencia de usuario fluida sin sacrificar la seguridad donde más importa.</p>
+                    </div>
+                </div>
+            </section>
+
+             <section id="gestion" class="p-8 bg-[#19376D] rounded-2xl shadow-xl">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+                    <div>
+                        <h2 class="text-3xl font-bold text-[#A5D7E8] mb-4">5. Gestión y Cumplimiento Centralizado</h2>
+                        <!-- ACTUALIZACIÓN: Menciona la gestión unificada de toda la plataforma híbrida. -->
+                        <p class="text-[#A5D7E8] mb-4">La gestión centralizada a través de la plataforma de Radware unifica la configuración y el monitoreo de las políticas L7 del Alteon (On-Premise) y las defensas de la Nube (**Cloud WAF** / **DefensePro**).</p>
+                        <p class="text-sm text-[#576CBC]">La visibilidad completa sobre los ataques bloqueados y el rendimiento de las aplicaciones permite una toma de decisiones informada y proactiva, cubriendo tanto las amenazas L7 como los ataques masivos de DDoS.</p>
+                    </div>
+                     <div class="bg-[#0B2447] rounded-lg p-4 font-mono text-xs text-gray-300">
+                        <p class="text-white font-bold mb-2">&gt; Reporte de Seguridad: App 1</p>
+                        <p><span class="text-green-400">[INFO]</span> Tráfico legítimo: 1,250 reqs/min</p>
+                        <p><span class="text-red-500">[BLOQUEADO]</span> Inyección SQL: 89 intentos</p>
+                        <p><span class="text-red-500">[BLOQUEADO]</span> Cross-Site Scripting: 42 intentos</p>
+                        <p><span class="text-yellow-400">[ALERTA]</span> Actividad de Bot sospechosa</p>
+                        <p class="mt-2 text-white font-bold">&gt; Reporte de Rendimiento: App 2</p>
+                        <p><span class="text-green-400">[INFO]</span> Tráfico total: 8,300 reqs/min</p>
+                        <p><span class="text-green-400">[INFO]</span> Latencia promedio: 12ms (MODO BYPASS)</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+    </div>
+
+<script>
+    const tooltipTitleCallback = (tooltipItems) => {
+        const item = tooltipItems[0];
+        let label = item.chart.data.labels[item.dataIndex];
+        if (Array.isArray(label)) {
+            return label.join(' ');
+        }
+        return label;
+    };
+
+    const wrapLabel = (label, maxWidth = 16) => {
+        if (label.length <= maxWidth) {
+            return label;
+        }
+        const words = label.split(' ');
+        const lines = [];
+        let currentLine = '';
+        words.forEach(word => {
+            if ((currentLine + word).length > maxWidth) {
+                lines.push(currentLine.trim());
+                currentLine = '';
+            }
+            currentLine += word + ' ';
+        });
+        lines.push(currentLine.trim());
+        return lines;
+    };
+    
+    const ataquesCtx = document.getElementById('ataquesBloqueadosChart');
+    new Chart(ataquesCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Ataques Bloqueados', 'Tráfico Legítimo'],
+            datasets: [{
+                label: 'Resultado de Política de Bloqueo',
+                data: [131, 1250],
+                backgroundColor: [
+                    '#ef4444', 
+                    '#A5D7E8'
+                ],
+                borderColor: '#19376D',
+                borderWidth: 4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: '#A5D7E8' }
+                },
+                title: {
+                    display: true,
+                    text: 'Política de Bloqueo en Acción',
+                    color: '#FFFFFF',
+                    font: { size: 18 }
+                },
+                tooltip: {
+                    callbacks: { title: tooltipTitleCallback }
+                }
+            }
+        }
+    });
+
+    const latenciaCtx = document.getElementById('latenciaChart');
+    new Chart(latenciaCtx, {
+        type: 'bar',
+        data: {
+            labels: ['Con Inspección WAF', 'Modo Bypass'],
+            datasets: [{
+                label: 'Latencia (ms)',
+                data: [150, 12],
+                backgroundColor: [
+                    '#f87171',
+                    '#34d399'
+                ],
+                borderColor: [
+                    '#ef4444',
+                    '#10b981'
+                ],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    grid: { color: '#576CBC' },
+                    ticks: { color: '#A5D7E8' }
+                },
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#A5D7E8' }
+                }
+            },
+            plugins: {
+                 legend: { display: false },
+                 title: {
+                    display: true,
+                    text: 'Comparativa de Latencia de Respuesta',
+                    color: '#FFFFFF',
+                    font: { size: 18 }
+                },
+                tooltip: {
+                    callbacks: { title: tooltipTitleCallback }
+                }
+            }
+        }
+    });
+</script>
+
+</body>
+</html>
